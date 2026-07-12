@@ -300,8 +300,12 @@ def send_pending_leads(min_score: int = Query(7, ge=1, le=10)):
 # ==========================================
 # 8. ÉTAPE DE DÉMARRAGE DU SERVEUR (Nouveau)
 # ==========================================
+# ==========================================
+# 8. ÉTAPE DE DÉMARRAGE DU SERVEUR
+# ==========================================
 if __name__ == "__main__":
-    # Récupère le port attribué par Railway ou utilise 8080 par défaut
     port = int(os.getenv("PORT", 8080))
     print(f"🚀 Lancement d'Uvicorn sur le port {port}...")
-    uvicorn.run("main.py:app", host="0.0.0.0", port=port, reload=False)
+    # ✅ CORRECTION ICI : "main:app" au lieu de "main.py:app"
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+
