@@ -110,7 +110,7 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
     "voice_id": "0380f3b923184518bf2f6027a44f7725"  # ID de la voix "Gilles" - Français Standard Premium
 },
         "dimension": {"width": 1280, "height": 720}
-    }
+    },
 
     try:
         res = requests.post("https://api.heygen.com/v2/video/generate", json=payload, headers=headers)
