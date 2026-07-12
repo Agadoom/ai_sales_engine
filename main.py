@@ -126,11 +126,12 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
     payload = {
         "video_inputs": [
             {
-                "character": {
+                                "character": {
                     "type": "avatar",
-                    "avatar_id": "Benjamin_front_professional_public",
+                    "avatar_id": "josh_lite_20240524",  # Avatar public gratuit v2 le plus stable de l'API
                     "avatar_style": "normal"
                 },
+
                 "voice": {
                     "type": "text",
                     "input_text": script_text,
