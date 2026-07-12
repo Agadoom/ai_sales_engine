@@ -81,19 +81,35 @@ def get_french_voice_id(headers: dict) -> Optional[str]:
         res = requests.get("https://api.heygen.com/v2/voices", headers=headers)
         if res.status_code == 200:
             voices = res.json().get("data", {}).get("voices", [])
-            # Cherche une voix française
             for v in voices:
                 language = str(v.get("language", "")).lower()
                 if "french" in language or "fr" in language:
                     print(f"🎙️ Voix française trouvée : {v.get('name')} ({v.get('voice_id')})")
                     return v.get("voice_id")
-            
-            # Si aucune voix française spécifique n'est trouvée, prends la première voix disponible
             if voices:
                 print(f"⚠️ Pas de voix française spécifique trouvée, utilisation de : {voices[0].get('voice_id')}")
                 return voices[0].get("voice_id")
     except Exception as e:
         print(f"⚠️ Erreur lors de la récupération des voix HeyGen : {e}")
+    return None
+
+
+def get_avatar_id(headers: dict) -> Optional[str]:
+    """
+    Interroge l'API HeyGen pour récupérer le premier avatar disponible sur l'espace de travail.
+    """
+    try:
+        res = requests.get("https://api.heygen.com/v2/avatars", headers=headers)
+        if res.status_code == 200:
+            avatars = res.json().get("data", {}).get("avatars", [])
+            if avatars:
+                # On extrait l'avatar_id ou le premier look disponible
+                first_avatar = avatars[0]
+                avatar_id = first_avatar.get("avatar_id")
+                print(f"👤 Avatar trouvé sur le compte : {avatar_id}")
+                return avatar_id
+    except Exception as e:
+        print(f"⚠️ Erreur lors de la récupération des avatars HeyGen : {e}")
     return None
 
 
@@ -110,10 +126,16 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
         "Content-Type": "application/json"
     }
 
-    # 1. Récupération dynamique d'une voix française valide
+    # 1. Récupération dynamique de la voix
     voice_id = get_french_voice_id(headers)
     if not voice_id:
         print("❌ Impossible de trouver un voice_id valide sur le compte HeyGen.")
+        return None
+
+    # 2. Récupération dynamique de l'avatar présent sur ton compte
+    avatar_id = get_avatar_id(headers)
+    if not avatar_id:
+        print("❌ Aucun avatar trouvé sur ton compte HeyGen. Créez-en un ou ajoutez un avatar public à votre espace.")
         return None
 
     script_text = (
@@ -126,16 +148,15 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
     payload = {
         "video_inputs": [
             {
-                                "character": {
+                "character": {
                     "type": "avatar",
-                    "avatar_id": "josh_lite_20240524",  # Avatar public gratuit v2 le plus stable de l'API
+                    "avatar_id": avatar_id, # ID Dynamique de ton compte !
                     "avatar_style": "normal"
                 },
-
                 "voice": {
                     "type": "text",
                     "input_text": script_text,
-                    "voice_id": voice_id  # ID dynamique vérifié
+                    "voice_id": voice_id
                 },
                 "background": {
                     "type": "color",
@@ -182,6 +203,7 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
     except Exception as e:
         print(f"❌ Exception HeyGen détaillée : {e}")
         return None
+
 
 # ==========================================
 # 5. MODULE DE QUALIFICATION ET EMAIL (IA)
