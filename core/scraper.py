@@ -13,19 +13,30 @@ class LocalBusinessScraper:
         self.base_url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
         self.details_url = "https://maps.googleapis.com/maps/api/place/details/json"
 
-    def search_businesses(self, query: str) -> List[Dict[str, Any]]:
-        """
-        Exemple de query : 'Boulangerie Lyon' ou 'Restaurant Marseille'
-        """
+        def search_businesses(self, query: str) -> List[Dict[str, Any]]:
+        # Sécurité : si la query est vide ou None, on s'arrête tout de suite
+        if not query or not query.strip():
+            print("⚠️ Recherche vide annulée.")
+            return []
+
         params = {
-            "query": query,
+            "query": query.strip(),
             "key": self.api_key,
             "language": "fr"
         }
         
         response = requests.get(self.base_url, params=params)
         response.raise_for_status()
-        results = response.json().get("results", [])
+        data = response.json()
+        
+        # Vérification du statut retourné par Google Places
+        if data.get("status") != "OK":
+            print(f"⚠️ Google Places API a répondu : {data.get('status')}")
+            return []
+            
+        results = data.get("results", [])
+        # ... reste du code ...
+
         
         formatted_prospects = []
         
