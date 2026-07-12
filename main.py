@@ -102,11 +102,12 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
                     "avatar_id": "Benjamin_front_professional_public",
                     "avatar_style": "normal"
                 },
-                "voice": {
-                    "type": "text",
-                    "input_text": script_text,
-                    "voice_id": "26b200d6e34d44359d9912ceae4afbd6"  # Voix standard alternative si besoin
-                },
+                # ✅ NOUVEAU PAYLOAD CORRIGÉ
+"voice": {
+    "type": "text",
+    "input_text": script_text,
+    "voice_id": "fr-FR-HenriNeural"  # Voix standard de référence stable
+},
                 "background": {
                     "type": "color",
                     "value": "#FAFAFA"
