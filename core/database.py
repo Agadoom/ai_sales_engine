@@ -41,4 +41,5 @@ class LeadModel(Base):
 
 def init_db():
     """Crée les tables dans la BDD si elles n'existent pas"""
-    Base.metadata.create_engine(bind=engine)
+    Base.metadata.create_all(bind=engine)  # ✅ La bonne méthode
+
