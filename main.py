@@ -47,7 +47,7 @@ class LeadModel(Base):
     video_url = Column(Text, nullable=True)
     status = Column(String, default="QUALIFIED")  # QUALIFIED, SENT, FAILED
 
-# CORRIGÉ : Utilisation de create_all pour générer les tables
+# Création des tables
 Base.metadata.create_all(bind=engine)
 
 # ==========================================
@@ -62,7 +62,6 @@ class ProspectQualification(BaseModel):
     priority_score: int = Field(description="Score de 1 à 10 pour la priorité commerciale")
     personalized_hook: str = Field(description="Accroche basée sur leur métier")
 
-# CORRIGÉ : Syntaxe json_schema_extra conforme à Pydantic V2
 class TriggerRequest(BaseModel):
     query: str = Field(..., json_schema_extra={"example": "Boulangerie Paris"})
 
@@ -102,24 +101,27 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
                     "avatar_id": "Benjamin_front_professional_public",
                     "avatar_style": "normal"
                 },
-                # ✅ NOUVEAU PAYLOAD CORRIGÉ
-# ✅ VERSION SÉCURISÉE POUR HEYGEN V2
-"voice": {
-    "type": "text",
-    "input_text": script_text,
-    "voice_id": "0380f3b923184518bf2f6027a44f7725"  # ID de la voix "Gilles" - Français Standard Premium
-},
+                "voice": {
+                    "type": "text",
+                    "input_text": script_text,
+                    "voice_id": "0380f3b923184518bf2f6027a44f7725"  # Voix "Gilles" - Français Standard
+                },
+                "background": {
+                    "type": "color",
+                    "value": "#FAFAFA"
+                }
+            }
+        ],
         "dimension": {"width": 1280, "height": 720}
-    },
+    }
 
     try:
         res = requests.post("https://api.heygen.com/v2/video/generate", json=payload, headers=headers)
-        
-        # 💡 ICI : On affiche le vrai code de réponse si ce n'est pas un succès
+
         if res.status_code != 200:
             print(f"❌ Erreur HTTP HeyGen ({res.status_code}) : {res.text}")
             return None
-            
+
         res_data = res.json()
         video_id = res_data.get("data", {}).get("video_id")
 
@@ -149,7 +151,6 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
     except Exception as e:
         print(f"❌ Exception HeyGen détaillée : {e}")
         return None
-
 
 # ==========================================
 # 5. MODULE DE QUALIFICATION ET EMAIL (IA)
@@ -301,14 +302,10 @@ def send_pending_leads(min_score: int = Query(7, ge=1, le=10)):
         db.close()
 
 # ==========================================
-# 8. ÉTAPE DE DÉMARRAGE DU SERVEUR (Nouveau)
-# ==========================================
-# ==========================================
 # 8. ÉTAPE DE DÉMARRAGE DU SERVEUR
 # ==========================================
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))
     print(f"🚀 Lancement d'Uvicorn sur le port {port}...")
-    # ✅ CORRECTION ICI : "main:app" au lieu de "main.py:app"
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
-
