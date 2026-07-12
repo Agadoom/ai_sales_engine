@@ -93,7 +93,8 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
         f"Regardons ensemble comment Dedall Energy peut vous accompagner."
     )
 
-        payload = {
+    # ✅ INDENTATION CORRIGÉE ICI
+    payload = {
         "video_inputs": [
             {
                 "character": {
@@ -104,8 +105,7 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
                 "voice": {
                     "type": "text",
                     "input_text": script_text,
-                    # 💡 FIX : On demande explicitement du Français sans forcer un ID qui crash
-                    "language": "French" 
+                    "language": "French"  # Sélection automatique de la voix française du compte
                 },
                 "background": {
                     "type": "color",
@@ -115,7 +115,6 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
         ],
         "dimension": {"width": 1280, "height": 720}
     }
-
 
     try:
         res = requests.post("https://api.heygen.com/v2/video/generate", json=payload, headers=headers)
