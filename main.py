@@ -1,6 +1,7 @@
 import os
 import time
 import requests
+import uvicorn
 from typing import List, Optional, Literal
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -46,7 +47,7 @@ class LeadModel(Base):
     video_url = Column(Text, nullable=True)
     status = Column(String, default="QUALIFIED")  # QUALIFIED, SENT, FAILED
 
-#  LIGNE CORRIGÉE :
+# CORRIGÉ : Utilisation de create_all pour générer les tables
 Base.metadata.create_all(bind=engine)
 
 # ==========================================
@@ -61,14 +62,13 @@ class ProspectQualification(BaseModel):
     priority_score: int = Field(description="Score de 1 à 10 pour la priorité commerciale")
     personalized_hook: str = Field(description="Accroche basée sur leur métier")
 
-class GeneratedEmail(BaseModel):
-    subject: str
-    body: str
-
-# ✅ NOUVELLE VERSION (Propre)
+# CORRIGÉ : Syntaxe json_schema_extra conforme à Pydantic V2
 class TriggerRequest(BaseModel):
     query: str = Field(..., json_schema_extra={"example": "Boulangerie Paris"})
 
+class GeneratedEmail(BaseModel):
+    subject: str
+    body: str
 
 # ==========================================
 # 4. MODULE HEYGEN (Génération Vidéo)
@@ -117,7 +117,6 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
     }
 
     try:
-        # 1. Lancement du rendu vidéo
         res = requests.post("https://api.heygen.com/v2/video/generate", json=payload, headers=headers)
         res_data = res.json()
         video_id = res_data.get("data", {}).get("video_id")
@@ -128,9 +127,8 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
 
         print(f"🎬 Vidéo HeyGen lancée (ID: {video_id}). En attente du rendu...")
 
-        # 2. Polling (Attente que la vidéo soit prête)
         status_url = f"https://api.heygen.com/v1/video_status.get?video_id={video_id}"
-        for _ in range(20):  # Attente max : 20 x 10s = 200s
+        for _ in range(20):
             time.sleep(10)
             status_res = requests.get(status_url, headers=headers).json()
             status = status_res.get("data", {}).get("status")
@@ -158,7 +156,6 @@ def qualify_and_generate(company_name: str, raw_data: str):
     """
     Qualifie le prospect et rédige un email sur-mesure signé Billel de Dedall Energy.
     """
-    # Étape 1 : Qualification et scoring
     system_qualif = (
         "Tu es un expert en qualification B2B pour courtier en énergie. "
         "Évalue le potentiel d'économie d'énergie de l'entreprise."
@@ -175,7 +172,6 @@ def qualify_and_generate(company_name: str, raw_data: str):
     )
     qualification = res_qualif.choices[0].message.parsed
 
-    # Étape 2 : Rédaction de l'email
     system_email = """
 Tu es un expert en Cold Email B2B pour Dedall Energy. 
 Rédige un email court (3-4 phrases), personnalisé et impactant.
@@ -206,12 +202,8 @@ Ne mets JAMAIS de crochets comme [Votre Nom] ni d'autres balises génériques.
 # ==========================================
 
 def run_pipeline_task(query: str):
-    """
-    Tâche de fond : Recherche, Qualification, Génération vidéo et Sauvegarde en BDD.
-    """
     db = SessionLocal()
     try:
-        # Simulation/Exemple de données récoltées (À relier à ton scraper Google Maps)
         mock_leads = [
             {"company_name": f"{query} - Artisan 1", "raw_data": "Boulangerie équipée de 3 gros fours électriques 80kW."},
             {"company_name": f"{query} - Artisan 2", "raw_data": "Commerce de quartier, petit terminal de cuisson."}
@@ -221,15 +213,12 @@ def run_pipeline_task(query: str):
             company = item["company_name"]
             raw_info = item["raw_data"]
 
-            # 1. Qualification + Email IA
             qualif, email_info = qualify_and_generate(company, raw_info)
 
-            # 2. Génération vidéo HeyGen (Seulement si le score est haut)
             v_url = None
             if qualif.priority_score >= 7:
                 v_url = generate_heygen_video(company)
 
-            # 3. Sauvegarde dans PostgreSQL
             lead = LeadModel(
                 company_name=company,
                 raw_data=raw_info,
@@ -257,7 +246,6 @@ def run_pipeline_task(query: str):
 
 app = FastAPI(
     title="Dedall Energy - Automated Outreach Engine",
-    description="API de qualification de prospects, génération d'emails & vidéos IA et dispatch vers n8n.",
     version="2.0.0"
 )
 
@@ -267,30 +255,23 @@ def home():
 
 @app.post("/trigger-pipeline")
 def trigger_pipeline(payload: TriggerRequest, background_tasks: BackgroundTasks):
-    """
-    Déclenche le scraping, la qualification IA et la vidéo en tâche de fond.
-    """
     background_tasks.add_task(run_pipeline_task, payload.query)
-    return {"message": f"Pipeline lancé en tâche de fond pour la recherche : '{payload.query}'"}
+    return {"message": f"Pipeline lancé en tâche de fond pour : '{payload.query}'"}
 
 @app.post("/send-pending-leads")
 def send_pending_leads(min_score: int = Query(7, ge=1, le=10)):
-    """
-    Récupère les leads qualifiés en BDD et les envoie au Webhook n8n.
-    """
     if not OUTREACH_WEBHOOK_URL:
         raise HTTPException(status_code=500, detail="OUTREACH_WEBHOOK_URL non configurée.")
 
     db = SessionLocal()
     try:
-        # Sélection des leads qualifiés ayant un score suffisant
         pending_leads = db.query(LeadModel).filter(
             LeadModel.status == "QUALIFIED",
             LeadModel.priority_score >= min_score
         ).all()
 
         if not pending_leads:
-            return {"message": "Aucun lead qualifié en attente d'envoi.", "sent_count": 0}
+            return {"message": "Aucun lead en attente.", "sent_count": 0}
 
         sent_count = 0
         for lead in pending_leads:
@@ -298,17 +279,14 @@ def send_pending_leads(min_score: int = Query(7, ge=1, le=10)):
                 "company_name": lead.company_name,
                 "email_subject": lead.email_subject,
                 "email_body": lead.email_body,
-                "video_url": lead.video_url,  # Transmis directement à n8n !
+                "video_url": lead.video_url,
                 "priority_score": lead.priority_score
             }
 
             response = requests.post(OUTREACH_WEBHOOK_URL, json=payload_webhook)
-
             if response.status_code == 200:
                 lead.status = "SENT"
                 sent_count += 1
-            else:
-                print(f"❌ Erreur d'envoi webhook ({response.status_code}) pour {lead.company_name}")
 
         db.commit()
         return {"message": "Traitement terminé", "sent_count": sent_count}
@@ -318,3 +296,12 @@ def send_pending_leads(min_score: int = Query(7, ge=1, le=10)):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
+
+# ==========================================
+# 8. ÉTAPE DE DÉMARRAGE DU SERVEUR (Nouveau)
+# ==========================================
+if __name__ == "__main__":
+    # Récupère le port attribué par Railway ou utilise 8080 par défaut
+    port = int(os.getenv("PORT", 8080))
+    print(f"🚀 Lancement d'Uvicorn sur le port {port}...")
+    uvicorn.run("main.py:app", host="0.0.0.0", port=port, reload=False)
