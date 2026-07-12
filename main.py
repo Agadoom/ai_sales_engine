@@ -65,8 +65,10 @@ class GeneratedEmail(BaseModel):
     subject: str
     body: str
 
+# ✅ NOUVELLE VERSION (Propre)
 class TriggerRequest(BaseModel):
-    query: str = Field(..., example="Boulangerie Paris")
+    query: str = Field(..., json_schema_extra={"example": "Boulangerie Paris"})
+
 
 # ==========================================
 # 4. MODULE HEYGEN (Génération Vidéo)
