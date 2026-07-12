@@ -46,7 +46,8 @@ class LeadModel(Base):
     video_url = Column(Text, nullable=True)
     status = Column(String, default="QUALIFIED")  # QUALIFIED, SENT, FAILED
 
-Base.metadata.create_engine(bind=engine)
+#  LIGNE CORRIGÉE :
+Base.metadata.create_all(bind=engine)
 
 # ==========================================
 # 3. STRUCTURES DE DONNÉES (Pydantic Models)
