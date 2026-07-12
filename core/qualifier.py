@@ -76,7 +76,7 @@ Rédige un email court (maximum 3-4 phrases), percutant, humain et sans jargon. 
 RÈGLE DE SIGNATURE IMPÉRATIVE :
 Termine TOUJOURS l'email exactement par cette formule de politesse et cette signature :
 "Cordialement,
-Billel de Dedall Energy"
+Benoit BAUDOT de Dedall Energy"
 
 Ne laisse JAMAIS de balises génériques ni de crochets comme [Votre Nom] ou [Votre Prénom].
 """
