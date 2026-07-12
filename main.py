@@ -73,6 +73,30 @@ class GeneratedEmail(BaseModel):
 # 4. MODULE HEYGEN (Génération Vidéo)
 # ==========================================
 
+def get_french_voice_id(headers: dict) -> Optional[str]:
+    """
+    Interroge l'API HeyGen pour obtenir un voice_id français valide disponible sur le compte.
+    """
+    try:
+        res = requests.get("https://api.heygen.com/v2/voices", headers=headers)
+        if res.status_code == 200:
+            voices = res.json().get("data", {}).get("voices", [])
+            # Cherche une voix française
+            for v in voices:
+                language = str(v.get("language", "")).lower()
+                if "french" in language or "fr" in language:
+                    print(f"🎙️ Voix française trouvée : {v.get('name')} ({v.get('voice_id')})")
+                    return v.get("voice_id")
+            
+            # Si aucune voix française spécifique n'est trouvée, prends la première voix disponible
+            if voices:
+                print(f"⚠️ Pas de voix française spécifique trouvée, utilisation de : {voices[0].get('voice_id')}")
+                return voices[0].get("voice_id")
+    except Exception as e:
+        print(f"⚠️ Erreur lors de la récupération des voix HeyGen : {e}")
+    return None
+
+
 def generate_heygen_video(company_name: str) -> Optional[str]:
     """
     Génère une vidéo personnalisée via HeyGen V2 et retourne l'URL vidéo finale.
@@ -86,6 +110,12 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
         "Content-Type": "application/json"
     }
 
+    # 1. Récupération dynamique d'une voix française valide
+    voice_id = get_french_voice_id(headers)
+    if not voice_id:
+        print("❌ Impossible de trouver un voice_id valide sur le compte HeyGen.")
+        return None
+
     script_text = (
         f"Bonjour, je m'adresse à l'équipe de {company_name}. "
         f"En analysant vos équipements, j'ai remarqué une opportunité majeure "
@@ -93,7 +123,6 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
         f"Regardons ensemble comment Dedall Energy peut vous accompagner."
     )
 
-    # ✅ INDENTATION CORRIGÉE ICI
     payload = {
         "video_inputs": [
             {
@@ -105,7 +134,7 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
                 "voice": {
                     "type": "text",
                     "input_text": script_text,
-                    "language": "French"  # Sélection automatique de la voix française du compte
+                    "voice_id": voice_id  # ID dynamique vérifié
                 },
                 "background": {
                     "type": "color",
