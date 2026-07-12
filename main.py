@@ -103,17 +103,12 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
                     "avatar_style": "normal"
                 },
                 # ✅ NOUVEAU PAYLOAD CORRIGÉ
+# ✅ VERSION SÉCURISÉE POUR HEYGEN V2
 "voice": {
     "type": "text",
     "input_text": script_text,
-    "voice_id": "fr-FR-HenriNeural"  # Voix standard de référence stable
+    "voice_id": "0380f3b923184518bf2f6027a44f7725"  # ID de la voix "Gilles" - Français Standard Premium
 },
-                "background": {
-                    "type": "color",
-                    "value": "#FAFAFA"
-                }
-            }
-        ],
         "dimension": {"width": 1280, "height": 720}
     }
 
