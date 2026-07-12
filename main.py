@@ -96,21 +96,37 @@ def get_french_voice_id(headers: dict) -> Optional[str]:
 
 def get_avatar_id(headers: dict) -> Optional[str]:
     """
-    Interroge l'API HeyGen pour récupérer le premier avatar disponible sur l'espace de travail.
+    Interroge l'API HeyGen pour récupérer un avatar compatible sur l'espace de travail.
     """
     try:
         res = requests.get("https://api.heygen.com/v2/avatars", headers=headers)
         if res.status_code == 200:
             avatars = res.json().get("data", {}).get("avatars", [])
             if avatars:
-                # On extrait l'avatar_id ou le premier look disponible
+                # On essaie d'abord de trouver un avatar standard (non 'expressive' si possible)
+                for av in avatars:
+                    av_id = av.get("avatar_id", "")
+                    # Évitons les formats trop récents 'expressive' si des standards existent
+                    if "expressive" not in av_id:
+                        print(f"👤 Avatar standard trouvé sur le compte : {av_id}")
+                        return av_id
+                
+                # Si on n'a que du expressive, on vérifie s'il y a une liste de 'looks'
                 first_avatar = avatars[0]
+                looks = first_avatar.get("looks", [])
+                if looks:
+                    # Utiliser le premier look_id est souvent plus stable en v2
+                    look_id = looks[0].get("look_id")
+                    print(f"👤 Look d'avatar trouvé sur le compte : {look_id}")
+                    return look_id
+                
                 avatar_id = first_avatar.get("avatar_id")
-                print(f"👤 Avatar trouvé sur le compte : {avatar_id}")
+                print(f"👤 Avatar sélectionné par défaut : {avatar_id}")
                 return avatar_id
     except Exception as e:
         print(f"⚠️ Erreur lors de la récupération des avatars HeyGen : {e}")
     return None
+
 
 
 def generate_heygen_video(company_name: str) -> Optional[str]:
