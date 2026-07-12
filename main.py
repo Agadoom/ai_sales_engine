@@ -56,6 +56,7 @@ def send_pending_leads(min_score: int = 7, db: Session = Depends(get_db)):
             "phone": lead.phone,
             "email_subject": lead.email_subject,
             "email_body": lead.email_body,
+            "video_url": video_url,
             "priority_score": lead.priority_score
         }
 
