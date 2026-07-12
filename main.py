@@ -105,7 +105,7 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
                 "voice": {
                     "type": "text",
                     "input_text": script_text,
-                    "voice_id": "0dfbd6516a504c5bb17fa487a329df99"  # Voix française HD (Henri)
+                    "voice_id": "26b200d6e34d44359d9912ceae4afbd6"  # Voix standard alternative si besoin
                 },
                 "background": {
                     "type": "color",
@@ -118,11 +118,17 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
 
     try:
         res = requests.post("https://api.heygen.com/v2/video/generate", json=payload, headers=headers)
+        
+        # 💡 ICI : On affiche le vrai code de réponse si ce n'est pas un succès
+        if res.status_code != 200:
+            print(f"❌ Erreur HTTP HeyGen ({res.status_code}) : {res.text}")
+            return None
+            
         res_data = res.json()
         video_id = res_data.get("data", {}).get("video_id")
 
         if not video_id:
-            print(f"❌ Erreur HeyGen lors de l'initialisation : {res_data}")
+            print(f"❌ Réponse HeyGen sans video_id : {res_data}")
             return None
 
         print(f"🎬 Vidéo HeyGen lancée (ID: {video_id}). En attente du rendu...")
@@ -145,8 +151,9 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
         return None
 
     except Exception as e:
-        print(f"❌ Exception HeyGen : {e}")
+        print(f"❌ Exception HeyGen détaillée : {e}")
         return None
+
 
 # ==========================================
 # 5. MODULE DE QUALIFICATION ET EMAIL (IA)
