@@ -4,6 +4,7 @@ import json
 import secrets
 import requests
 import uvicorn
+from datetime import datetime, timedelta
 from typing import List, Optional, Literal
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Query, Request, Depends
@@ -13,7 +14,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from openai import OpenAI
-from datetime import datetime, timedelta
 
 # ==========================================
 # 1. AUTHENTIFICATION & SÉCURITÉ
@@ -25,7 +25,6 @@ ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "DedallEnergy2026!")
 
 HUNTER_API_KEY = os.getenv("HUNTER_API_KEY")
-
 
 def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
     correct_username = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
@@ -75,9 +74,9 @@ class LeadModel(Base):
     id = Column(Integer, primary_key=True, index=True)
     company_name = Column(String, nullable=False)
     manager_name = Column(String, nullable=True)
-    phone = Column(String, nullable=True)        # 👈 Téléphone
-    email = Column(String, nullable=True)        # 👈 E-mail du gérant
-    address = Column(String, nullable=True)      # 👈 Adresse physique
+    phone = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    address = Column(String, nullable=True)
     raw_data = Column(Text, nullable=True)
     energy_intensity = Column(String, nullable=True)
     priority_score = Column(Integer, default=0)
@@ -87,88 +86,22 @@ class LeadModel(Base):
     video_url = Column(Text, nullable=True)
     status = Column(String, default="QUALIFIED")
 
-# Auto-migration SQL pour ajouter les colonnes manquantes sans casser la BDD
+Base.metadata.create_all(bind=engine)
+
+# Auto-migrations SQL
 with engine.connect() as conn:
+    conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS manager_name VARCHAR;"))
     conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS phone VARCHAR;"))
     conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS email VARCHAR;"))
     conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS address VARCHAR;"))
     conn.commit()
 
-
-# Dépendance pour la session de base de données
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
-
-
-def is_older_than_3_years(date_string: str) -> bool:
-    """Vérifie si l'entreprise a plus de 3 ans."""
-    if not date_string:
-        return True
-    try:
-        creation_date = datetime.strptime(date_string, "%Y-%m-%d")
-        three_years_ago = datetime.now() - timedelta(days=3*365)
-        return creation_date <= three_years_ago
-    except Exception:
-        return True
-
-def fetch_company_legal_info(search_query: str, limit: int = 5):
-    """
-    Recherche Data.gouv ciblée Rhône-Alpes et filtrée sur +3 ans d'ancienneté.
-    """
-    print(f"🔍 Recherche ciblée Rhône-Alpes pour : '{search_query}'")
-    prospects = []
-    
-    # Départements Rhône-Alpes : 69, 38, 42, 01, 73, 74, 26, 07
-    rhone_alpes_deps = "69,38,42,01,73,74,26,07"
-
-    try:
-        url = (
-            f"https://recherche-entreprises.api.gouv.fr/search?"
-            f"q={requests.utils.quote(search_query)}"
-            f"&departement={rhone_alpes_deps}"
-            f"&per_page=15" # On prend une marge pour filtrer les < 3 ans
-        )
-        res = requests.get(url, timeout=5)
-        if res.status_code == 200:
-            results = res.json().get("results", [])
-            for company_data in results:
-                # 1. Filtre Ancienneté 3 ans
-                date_creation = company_data.get("date_creation")
-                if not is_older_than_3_years(date_creation):
-                    continue
-
-                company_name = company_data.get("nom_complet", search_query)
-                address = company_data.get("adresse", "Rhône-Alpes")
-                manager_name = "Gérant(e)"
-                dirigeants = company_data.get("dirigeants", [])
-
-                if dirigeants:
-                    d = dirigeants[0]
-                    prenom = d.get("prenoms", "").split(" ")[0].title()
-                    nom = d.get("nom", "").title()
-                    if prenom or nom:
-                        manager_name = f"{prenom} {nom}".strip()
-
-                prospects.append({
-                    "company_name": company_name,
-                    "manager_name": manager_name,
-                    "address": address,
-                    # Ces champs seront complétés par l'API de contact (ex: Dropcontact / Hunter)
-                    "email": None,
-                    "phone": None
-                })
-
-                if len(prospects) >= limit:
-                    break
-
-    except Exception as e:
-        print(f"⚠️ Erreur Data.gouv : {e}")
-
-    return prospects
 
 # ==========================================
 # 4. STRUCTURES DE DONNÉES (Pydantic Models)
@@ -183,7 +116,7 @@ class ProspectQualification(BaseModel):
     personalized_hook: str = Field(description="Accroche basée sur leur métier")
 
 class TriggerRequest(BaseModel):
-    query: Optional[str] = Field(None, json_schema_extra={"example": "Boulangerie Paris"})
+    query: Optional[str] = Field(None, json_schema_extra={"example": "Boulangerie Lyon"})
     company_name: Optional[str] = None
     raw_data: Optional[str] = "Recherche via interface"
 
@@ -196,62 +129,31 @@ class GeneratedEmail(BaseModel):
     body: str
 
 # ==========================================
-# 5. MODULE D'ENRICHISSEMENT (APIs EXTERNES)
+# 5. MODULE D'ENRICHISSEMENT & FILTRES
 # ==========================================
 
-def fetch_company_legal_info(search_query: str, limit: int = 5):
-    """
-    Interroge l'API Data.gouv et retourne une liste de prospects (jusqu'à `limit`).
-    """
-    print(f"🔍 Recherche multi-prospects pour : '{search_query}' (max {limit})")
-    prospects = []
-
+def is_older_than_3_years(date_string: Optional[str]) -> bool:
+    """Vérifie si l'entreprise a plus de 3 ans d'ancienneté."""
+    if not date_string:
+        return True
     try:
-        url = f"https://recherche-entreprises.api.gouv.fr/search?q={requests.utils.quote(search_query)}&per_page={limit}"
-        res = requests.get(url, timeout=5)
-        if res.status_code == 200:
-            results = res.json().get("results", [])
-            for company_data in results:
-                company_name = company_data.get("nom_complet", search_query)
-                manager_name = "Gérant(e)"
-                dirigeants = company_data.get("dirigeants", [])
-
-                if dirigeants:
-                    d = dirigeants[0]
-                    prenom = d.get("prenoms", "").split(" ")[0].title()
-                    nom = d.get("nom", "").title()
-                    if prenom or nom:
-                        manager_name = f"{prenom} {nom}".strip()
-
-                prospects.append({
-                    "company_name": company_name,
-                    "manager_name": manager_name
-                })
-    except Exception as e:
-        print(f"⚠️ Erreur lors de la recherche Data.gouv : {e}")
-
-    # Fallback si rien n'est trouvé
-    if not prospects:
-        prospects.append({"company_name": search_query, "manager_name": "Gérant(e)"})
-
-    return prospects
-
+        creation_date = datetime.strptime(date_string, "%Y-%m-%d")
+        three_years_ago = datetime.now() - timedelta(days=3*365)
+        return creation_date <= three_years_ago
+    except Exception:
+        return True
 
 def fetch_manager_email_hunter(manager_name: str, company_name: str) -> Optional[str]:
-    """
-    Recherche l'adresse e-mail professionnelle via l'API Hunter.io
-    """
+    """Recherche l'e-mail du gérant via Hunter.io."""
     if not HUNTER_API_KEY:
         print("⚠️ HUNTER_API_KEY non configurée.")
         return None
 
-    # Extraction prénom / nom
     parts = manager_name.split(" ")
     first_name = parts[0] if len(parts) > 0 else ""
     last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
 
     try:
-        # Recherche du domaine de l'entreprise ou email direct
         url = (
             f"https://api.hunter.io/v2/email-finder?"
             f"company={requests.utils.quote(company_name)}"
@@ -271,7 +173,71 @@ def fetch_manager_email_hunter(manager_name: str, company_name: str) -> Optional
 
     return None
 
+def fetch_company_legal_info(search_query: str, limit: int = 5):
+    """
+    Recherche Data.gouv ciblée Rhône-Alpes + Filtre +3 ans d'ancienneté.
+    """
+    print(f"🔍 Recherche ciblée Rhône-Alpes (+3 ans) pour : '{search_query}'")
+    prospects = []
+    
+    # Départements Rhône-Alpes : 69, 38, 42, 01, 73, 74, 26, 07
+    rhone_alpes_deps = "69,38,42,01,73,74,26,07"
 
+    try:
+        url = (
+            f"https://recherche-entreprises.api.gouv.fr/search?"
+            f"q={requests.utils.quote(search_query)}"
+            f"&departement={rhone_alpes_deps}"
+            f"&per_page=15"
+        )
+        res = requests.get(url, timeout=5)
+        if res.status_code == 200:
+            results = res.json().get("results", [])
+            for company_data in results:
+                # Filtre : +3 ans d'ancienneté
+                date_creation = company_data.get("date_creation")
+                if not is_older_than_3_years(date_creation):
+                    continue
+
+                company_name = company_data.get("nom_complet", search_query)
+                address = company_data.get("adresse", "Rhône-Alpes")
+                manager_name = "Gérant(e)"
+                dirigeants = company_data.get("dirigeants", [])
+
+                if dirigeants:
+                    d = dirigeants[0]
+                    prenom = d.get("prenoms", "").split(" ")[0].title()
+                    nom = d.get("nom", "").title()
+                    if prenom or nom:
+                        manager_name = f"{prenom} {nom}".strip()
+
+                # Recherche E-mail via Hunter.io
+                email = fetch_manager_email_hunter(manager_name, company_name)
+
+                prospects.append({
+                    "company_name": company_name,
+                    "manager_name": manager_name,
+                    "address": address,
+                    "email": email,
+                    "phone": None
+                })
+
+                if len(prospects) >= limit:
+                    break
+
+    except Exception as e:
+        print(f"⚠️ Erreur Data.gouv : {e}")
+
+    if not prospects:
+        prospects.append({
+            "company_name": search_query, 
+            "manager_name": "Gérant(e)", 
+            "address": "Rhône-Alpes",
+            "email": None,
+            "phone": None
+        })
+
+    return prospects
 
 # ==========================================
 # 6. MODULE HEYGEN (Génération Vidéo)
@@ -418,7 +384,6 @@ Ne mets JAMAIS de crochets comme [Votre Nom] ni d'autres balises génériques.
 
     return qualification, email_data
 
-
 # ==========================================
 # 8. PIPELINE PRINCIPAL ENRICHISSEMENT + IA
 # ==========================================
@@ -426,31 +391,32 @@ Ne mets JAMAIS de crochets comme [Votre Nom] ni d'autres balises génériques.
 def run_pipeline_task(query: str, raw_data: str):
     db = SessionLocal()
     try:
-        # 1. Filtre Rhône-Alpes + 3 ans d'existence
+        # Récupère les prospects filtrés (+3 ans / Rhône-Alpes) avec email Hunter.io
         prospects = fetch_company_legal_info(query, limit=5)
-        print(f"🎯 {len(prospects)} prospect(s) trouvé(s)")
+        print(f"🎯 {len(prospects)} prospect(s) qualifié(s) dans le secteur Rhône-Alpes (+3 ans)")
 
         for p in prospects:
             company_name = p["company_name"]
             manager_name = p["manager_name"]
+            manager_email = p.get("email")
 
-            # 2. Qualification + Email sur-mesure (OpenAI)
+            print(f"\n⚡ Traitement de : {company_name} (Dirigeant : {manager_name})")
+
+            # Qualification + Génération d'email
             qualif, email_info = qualify_and_generate(company_name, manager_name, raw_data)
 
-            # 3. Génération Vidéo HeyGen (si score >= 7)
+            # Vidéo HeyGen si le score est suffisant
             v_url = None
             if qualif.priority_score >= 7:
                 v_url = generate_heygen_video(company_name, manager_name)
 
-            # 4. Enrichissement Email via Dropcontact
-            manager_email = fetch_manager_email_dropcontact(manager_name, company_name)
-
-            # 5. Sauvegarde en BDD (Statut "QUALIFIED" = EN ATTENTE DE TON ACCORD)
+            # Sauvegarde en BDD
             lead = LeadModel(
                 company_name=company_name,
                 manager_name=manager_name,
-                email=manager_email, # 👈 Stocké ici
+                email=manager_email,
                 address=p.get("address"),
+                phone=p.get("phone"),
                 raw_data=raw_data,
                 energy_intensity=qualif.energy_intensity,
                 priority_score=qualif.priority_score,
@@ -458,18 +424,17 @@ def run_pipeline_task(query: str, raw_data: str):
                 email_subject=email_info.subject,
                 email_body=email_info.body,
                 video_url=v_url,
-                status="QUALIFIED" # 🛡️ Bloqué ici : AUCUN ENVOI AUTOMATIQUE
+                status="QUALIFIED" # 🛡️ Statut conservé pour validation manuelle
             )
             db.add(lead)
             db.commit()
-            print(f"💾 Prospect prêt pour révision : {company_name} | Mail : {manager_email}")
+            print(f"💾 Prospect sauvegardé : {company_name} | Mail : {manager_email}")
 
     except Exception as e:
-        print(f"❌ Erreur pipeline : {e}")
+        print(f"❌ Erreur pendant le pipeline : {e}")
         db.rollback()
     finally:
         db.close()
-
 
 # ==========================================
 # 9. ENDPOINTS FASTAPI
@@ -480,7 +445,6 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# 🔓 PROTECTION DESACTIVÉE ICI POUR LE TEST PILOTE
 @app.get("/")
 def home(request: Request, db: Session = Depends(get_db)):
     try:
@@ -493,13 +457,11 @@ def home(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/trigger-pipeline")
 def trigger_pipeline(payload: TriggerRequest, background_tasks: BackgroundTasks):
     company = payload.target_name
     background_tasks.add_task(run_pipeline_task, company, payload.raw_data)
     return {"message": f"Pipeline lancé en tâche de fond pour : '{company}'"}
-
 
 @app.post("/send-pending-leads")
 def send_pending_leads(min_score: int = Query(7, ge=1, le=10)):
@@ -521,6 +483,9 @@ def send_pending_leads(min_score: int = Query(7, ge=1, le=10)):
             payload_webhook = {
                 "company_name": lead.company_name,
                 "manager_name": lead.manager_name,
+                "email": lead.email,
+                "phone": lead.phone,
+                "address": lead.address,
                 "email_subject": lead.email_subject,
                 "email_body": lead.email_body,
                 "video_url": lead.video_url,
@@ -533,7 +498,7 @@ def send_pending_leads(min_score: int = Query(7, ge=1, le=10)):
                 sent_count += 1
 
         db.commit()
-        return {"message": "Traitement terminé", "sent_count": sent_count}
+        return {"message": "Envoi terminé avec succès", "sent_count": sent_count}
 
     except Exception as e:
         db.rollback()
