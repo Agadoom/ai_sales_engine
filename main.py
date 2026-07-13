@@ -10,6 +10,28 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, Da
 from sqlalchemy.orm import declarative_base, sessionmaker
 from openai import OpenAI
 import json
+import secrets # Pour une comparaison de chaînes sécurisée
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Query, Request, Depends
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.templating import Jinja2Templates
+
+# Définition de la sécurité
+security = HTTPBasic()
+
+# 🔐 Définis tes identifiants ici (Idéalement via variables d'environnement os.getenv)
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "DedallEnergy2026!") 
+
+def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
+    correct_password = secrets.compare_digest(credentials.password, ADMIN_PASSWORD)
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=401,
+            detail="Identifiants incorrects",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
 
 # ==========================================
 # 1. CONFIGURATION ET TEMPLATES
@@ -337,12 +359,12 @@ app = FastAPI(
 )
 
 # Endpoint HTML racine — Correctement formaté pour les versions récentes de FastAPI/Starlette
+# Endpoint HTML racine sécurisé
 @app.get("/")
-def home(request: Request):
+def home(request: Request, username: str = Depends(get_current_user)):
     db = SessionLocal()
     try:
         leads = db.query(LeadModel).order_by(LeadModel.id.desc()).all()
-        # ✅ NOUVELLE SYNTAXE : request en premier (ou nommé explicitement)
         return templates.TemplateResponse(
             request=request, 
             name="dashboard.html", 
@@ -350,6 +372,7 @@ def home(request: Request):
         )
     finally:
         db.close()
+
 
 
 @app.post("/trigger-pipeline")
