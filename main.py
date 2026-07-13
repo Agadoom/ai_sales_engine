@@ -40,7 +40,6 @@ def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
 
 templates = Jinja2Templates(directory="templates")
 
-# Filtre personnalisé 'escapejs' pour éviter les crashs Jinja2 dans les modals JS
 def escapejs_filter(val):
     if val is None:
         return ""
@@ -56,7 +55,6 @@ OUTREACH_WEBHOOK_URL = os.getenv("OUTREACH_WEBHOOK_URL")
 if not DATABASE_URL:
     raise ValueError("⚠️ DATABASE_URL est manquante dans les variables d'environnement.")
 
-# Connexion PostgreSQL via SQLAlchemy
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -72,6 +70,7 @@ class LeadModel(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     company_name = Column(String, nullable=False)
+    manager_name = Column(String, nullable=True) # 👈 Nom du gérant ajouté
     phone = Column(String, nullable=True)
     raw_data = Column(Text, nullable=True)
     energy_intensity = Column(String, nullable=True)
@@ -80,9 +79,8 @@ class LeadModel(Base):
     email_subject = Column(String, nullable=True)
     email_body = Column(Text, nullable=True)
     video_url = Column(Text, nullable=True)
-    status = Column(String, default="QUALIFIED")  # QUALIFIED, SENT, FAILED
+    status = Column(String, default="QUALIFIED")
 
-# Création automatique des tables
 Base.metadata.create_all(bind=engine)
 
 # ==========================================
@@ -98,27 +96,57 @@ class ProspectQualification(BaseModel):
     personalized_hook: str = Field(description="Accroche basée sur leur métier")
 
 class TriggerRequest(BaseModel):
+    query: Optional[str] = Field(None, json_schema_extra={"example": "Boulangerie Paris"})
     company_name: Optional[str] = None
-    query: Optional[str] = None
-    raw_data: Optional[str] = "Informations non renseignées"
+    raw_data: Optional[str] = "Recherche via interface"
 
-    # Propriété pour récupérer automatiquement le nom, peu importe la clé envoyée
     @property
-    def name(self) -> str:
-        return self.company_name or self.query or "Entreprise Inconnue"
-
-
+    def target_name(self) -> str:
+        return self.query or self.company_name or "Entreprise Inconnue"
 
 class GeneratedEmail(BaseModel):
     subject: str
     body: str
 
 # ==========================================
-# 5. MODULE HEYGEN (Génération Vidéo)
+# 5. MODULE D'ENRICHISSEMENT (APIs EXTERNES)
+# ==========================================
+
+def fetch_company_legal_info(search_query: str):
+    """
+    Interroge l'API gouvernementale Data.gouv pour trouver le gérant/dirigeant officiel.
+    """
+    print(f"🔍 Recherche d'enrichissement pour : {search_query}")
+    manager_name = "Gérant(e)"
+    full_company_name = search_query
+
+    try:
+        url = f"https://recherche-entreprises.api.gouv.fr/search?q={requests.utils.quote(search_query)}&per_page=1"
+        res = requests.get(url, timeout=5)
+        if res.status_code == 200:
+            results = res.json().get("results", [])
+            if results:
+                company_data = results[0]
+                full_company_name = company_data.get("nom_complet", search_query)
+                dirigeants = company_data.get("dirigeants", [])
+                
+                if dirigeants:
+                    d = dirigeants[0]
+                    prenom = d.get("prenoms", "").split(" ")[0].title()
+                    nom = d.get("nom", "").title()
+                    if prenom or nom:
+                        manager_name = f"{prenom} {nom}".strip()
+                        print(f"👤 Dirigeant trouvé : {manager_name}")
+    except Exception as e:
+        print(f"⚠️ Erreur lors de la recherche SIRENE/Data.gouv : {e}")
+
+    return full_company_name, manager_name
+
+# ==========================================
+# 6. MODULE HEYGEN (Génération Vidéo)
 # ==========================================
 
 def get_french_voice_id(headers: dict) -> Optional[str]:
-    """Interroge l'API HeyGen pour obtenir un voice_id français valide."""
     try:
         res = requests.get("https://api.heygen.com/v2/voices", headers=headers)
         if res.status_code == 200:
@@ -126,18 +154,15 @@ def get_french_voice_id(headers: dict) -> Optional[str]:
             for v in voices:
                 language = str(v.get("language", "")).lower()
                 if "french" in language or "fr" in language:
-                    print(f"🎙️ Voix française trouvée : {v.get('name')} ({v.get('voice_id')})")
                     return v.get("voice_id")
             if voices:
-                print(f"⚠️ Pas de voix française spécifique trouvée, utilisation de : {voices[0].get('voice_id')}")
                 return voices[0].get("voice_id")
     except Exception as e:
-        print(f"⚠️ Erreur lors de la récupération des voix HeyGen : {e}")
+        print(f"⚠️ Erreur Voix HeyGen : {e}")
     return None
 
 
 def get_avatar_id(headers: dict) -> Optional[str]:
-    """Interroge l'API HeyGen pour récupérer un avatar compatible."""
     try:
         res = requests.get("https://api.heygen.com/v2/avatars", headers=headers)
         if res.status_code == 200:
@@ -146,27 +171,18 @@ def get_avatar_id(headers: dict) -> Optional[str]:
                 for av in avatars:
                     looks = av.get("looks", [])
                     if looks:
-                        print(f"👤 Look d'avatar trouvé sur le compte : {looks[0].get('look_id')}")
                         return looks[0].get('look_id')
-
                 for av in avatars:
-                    av_id = av.get("avatar_id", "")
-                    if "expressive" not in av_id:
-                        print(f"👤 Avatar standard trouvé sur le compte : {av_id}")
-                        return av_id
-
-                avatar_id = avatars[0].get("avatar_id")
-                print(f"👤 Avatar sélectionné par défaut : {avatar_id}")
-                return avatar_id
+                    if "expressive" not in av.get("avatar_id", ""):
+                        return av.get("avatar_id")
+                return avatars[0].get("avatar_id")
     except Exception as e:
-        print(f"⚠️ Erreur lors de la récupération des avatars HeyGen : {e}")
+        print(f"⚠️ Erreur Avatar HeyGen : {e}")
     return None
 
 
-def generate_heygen_video(company_name: str) -> Optional[str]:
-    """Génère une vidéo personnalisée via l'API HeyGen V2."""
+def generate_heygen_video(company_name: str, manager_name: str) -> Optional[str]:
     if not HEYGEN_API_KEY:
-        print("⚠️ HEYGEN_API_KEY non fournie, étape vidéo ignorée.")
         return None
 
     headers = {
@@ -178,12 +194,14 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
     avatar_id = get_avatar_id(headers)
 
     if not voice_id or not avatar_id:
-        print("❌ Ressources HeyGen (Voix ou Avatar) introuvables. Annulation.")
         return None
 
+    # Adaptation du script vidéo avec le nom du gérant s'il est connu
+    salutation = f"Bonjour {manager_name}" if manager_name != "Gérant(e)" else f"Bonjour à l'équipe de {company_name}"
+
     script_text = (
-        f"Bonjour, je m'adresse à l'équipe de {company_name}. "
-        f"En analysant vos équipements, j'ai remarqué une opportunité majeure "
+        f"{salutation}. "
+        f"En analysant les équipements de {company_name}, j'ai remarqué une opportunité majeure "
         f"pour réduire vos factures d'électricité ce mois-ci. "
         f"Regardons ensemble comment Dedall Energy peut vous accompagner."
     )
@@ -191,20 +209,9 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
     payload = {
         "video_inputs": [
             {
-                "character": {
-                    "type": "avatar",
-                    "avatar_id": avatar_id,
-                    "avatar_style": "normal"
-                },
-                "voice": {
-                    "type": "text",
-                    "input_text": script_text,
-                    "voice_id": voice_id
-                },
-                "background": {
-                    "type": "color",
-                    "value": "#FAFAFA"
-                }
+                "character": {"type": "avatar", "avatar_id": avatar_id, "avatar_style": "normal"},
+                "voice": {"type": "text", "input_text": script_text, "voice_id": voice_id},
+                "background": {"type": "color", "value": "#FAFAFA"}
             }
         ],
         "dimension": {"width": 1280, "height": 720}
@@ -212,19 +219,12 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
 
     try:
         res = requests.post("https://api.heygen.com/v2/video/generate", json=payload, headers=headers)
-
         if res.status_code != 200:
-            print(f"❌ Erreur HTTP HeyGen ({res.status_code}) : {res.text}")
             return None
 
-        res_data = res.json()
-        video_id = res_data.get("data", {}).get("video_id")
-
+        video_id = res.json().get("data", {}).get("video_id")
         if not video_id:
-            print(f"❌ Réponse HeyGen sans video_id : {res_data}")
             return None
-
-        print(f"🎬 Vidéo HeyGen lancée (ID: {video_id}). En attente du rendu...")
 
         status_url = f"https://api.heygen.com/v1/video_status.get?video_id={video_id}"
         for _ in range(30):
@@ -233,26 +233,19 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
             status = status_res.get("data", {}).get("status")
 
             if status == "completed":
-                video_url = status_res["data"]["video_url"]
-                print(f"✅ Vidéo HeyGen prête : {video_url}")
-                return video_url
+                return status_res["data"]["video_url"]
             elif status == "failed":
-                print(f"❌ Échec de la génération vidéo HeyGen. Détails : {status_res}")
                 return None
-
-        print("⏰ Timeout HeyGen atteint.")
         return None
-
     except Exception as e:
-        print(f"❌ Exception HeyGen détaillée : {e}")
+        print(f"❌ Exception HeyGen : {e}")
         return None
 
 # ==========================================
-# 6. MODULE DE QUALIFICATION ET EMAIL (IA)
+# 7. MODULE DE QUALIFICATION ET EMAIL (IA)
 # ==========================================
 
-def qualify_and_generate(company_name: str, raw_data: str):
-    """Qualifie le prospect et rédige un email sur-mesure."""
+def qualify_and_generate(company_name: str, manager_name: str, raw_data: str):
     system_qualif = (
         "Tu es un expert en qualification B2B pour courtier en énergie. "
         "Évalue le potentiel d'économie d'énergie de l'entreprise."
@@ -269,9 +262,12 @@ def qualify_and_generate(company_name: str, raw_data: str):
     )
     qualification = res_qualif.choices[0].message.parsed
 
-    system_email = """
+    salutation_instruction = f"Adresse-toi directement à {manager_name}." if manager_name != "Gérant(e)" else "Adresse-toi au gérant de manière professionnelle."
+
+    system_email = f"""
 Tu es un expert en Cold Email B2B pour Dedall Energy. 
 Rédige un email court (3-4 phrases), personnalisé et impactant.
+{salutation_instruction}
 
 RÈGLE IMPÉRATIVE DE SIGNATURE :
 Termine TOUJOURS l'email exactement par cette signature :
@@ -295,21 +291,27 @@ Ne mets JAMAIS de crochets comme [Votre Nom] ni d'autres balises génériques.
     return qualification, email_data
 
 # ==========================================
-# 7. PIPELINE PRINCIPAL (Background Task)
+# 8. PIPELINE PRINCIPAL ENRICHISSEMENT + IA
 # ==========================================
 
-def run_pipeline_task(company_name: str, raw_data: str):
-    """Exécute la qualification, la génération vidéo et la sauvegarde pour UN SEUL prospect."""
+def run_pipeline_task(query: str, raw_data: str):
     db = SessionLocal()
     try:
-        qualif, email_info = qualify_and_generate(company_name, raw_data)
+        # ÉAPE 1 : Enrichissement automatique (API Gérant / Data.gouv)
+        company_name, manager_name = fetch_company_legal_info(query)
 
+        # ÉTAPE 2 : Qualification + Email sur mesure
+        qualif, email_info = qualify_and_generate(company_name, manager_name, raw_data)
+
+        # ÉTAPE 3 : Vidéo personnalisée (si score >= 7)
         v_url = None
         if qualif.priority_score >= 7:
-            v_url = generate_heygen_video(company_name)
+            v_url = generate_heygen_video(company_name, manager_name)
 
+        # ÉTAPE 4 : Sauvegarde BDD
         lead = LeadModel(
             company_name=company_name,
+            manager_name=manager_name,
             raw_data=raw_data,
             energy_intensity=qualif.energy_intensity,
             priority_score=qualif.priority_score,
@@ -321,7 +323,7 @@ def run_pipeline_task(company_name: str, raw_data: str):
         )
         db.add(lead)
         db.commit()
-        print(f"💾 Prospect sauvegardé en BDD : {company_name} (Score: {qualif.priority_score})")
+        print(f"💾 Prospect enrichi & sauvegardé : {company_name} | Dirigeant : {manager_name} | Score : {qualif.priority_score}")
 
     except Exception as e:
         print(f"❌ Erreur pendant le pipeline : {e}")
@@ -330,7 +332,7 @@ def run_pipeline_task(company_name: str, raw_data: str):
         db.close()
 
 # ==========================================
-# 8. ENDPOINTS FASTAPI
+# 9. ENDPOINTS FASTAPI
 # ==========================================
 
 app = FastAPI(
@@ -338,7 +340,6 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# Dashboard HTML sécurisé via HTTP Basic Auth
 @app.get("/")
 def home(request: Request, username: str = Depends(get_current_user)):
     db = SessionLocal()
@@ -355,9 +356,9 @@ def home(request: Request, username: str = Depends(get_current_user)):
 
 @app.post("/trigger-pipeline")
 def trigger_pipeline(payload: TriggerRequest, background_tasks: BackgroundTasks):
-    company = payload.name
+    company = payload.target_name
     background_tasks.add_task(run_pipeline_task, company, payload.raw_data)
-    return {"message": f"Pipeline lancé en tâche de fond pour l'entreprise : '{company}'"}
+    return {"message": f"Pipeline lancé en tâche de fond pour : '{company}'"}
 
 
 @app.post("/send-pending-leads")
@@ -379,6 +380,7 @@ def send_pending_leads(min_score: int = Query(7, ge=1, le=10)):
         for lead in pending_leads:
             payload_webhook = {
                 "company_name": lead.company_name,
+                "manager_name": lead.manager_name,
                 "email_subject": lead.email_subject,
                 "email_body": lead.email_body,
                 "video_url": lead.video_url,
@@ -400,7 +402,7 @@ def send_pending_leads(min_score: int = Query(7, ge=1, le=10)):
         db.close()
 
 # ==========================================
-# 9. DÉMARRAGE DU SERVEUR
+# 10. DÉMARRAGE DU SERVEUR
 # ==========================================
 
 if __name__ == "__main__":
