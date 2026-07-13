@@ -355,8 +355,9 @@ def home(request: Request, username: str = Depends(get_current_user)):
 
 @app.post("/trigger-pipeline")
 def trigger_pipeline(payload: TriggerRequest, background_tasks: BackgroundTasks):
-    background_tasks.add_task(run_pipeline_task, payload.company_name, payload.raw_data)
-    return {"message": f"Pipeline lancé en tâche de fond pour l'entreprise : '{payload.company_name}'"}
+    company = payload.name
+    background_tasks.add_task(run_pipeline_task, company, payload.raw_data)
+    return {"message": f"Pipeline lancé en tâche de fond pour l'entreprise : '{company}'"}
 
 
 @app.post("/send-pending-leads")
