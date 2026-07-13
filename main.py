@@ -9,6 +9,20 @@ from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 from openai import OpenAI
+import json
+
+# Initialisation des templates Jinja2
+templates = Jinja2Templates(directory="templates")
+
+# ✅ Ajouter le filtre custom 'escapejs' à Jinja2
+def escapejs_filter(val):
+    if val is None:
+        return ""
+    # Encode en JSON et retire les guillemets de début/fin
+    return json.dumps(str(val))[1:-1]
+
+templates.env.filters["escapejs"] = escapejs_filter
+
 
 # ==========================================
 # 1. CONFIGURATION ET VARIABLES D'ENVIRONNEMENT
