@@ -86,6 +86,11 @@ class LeadModel(Base):
     video_url = Column(Text, nullable=True)
     status = Column(String, default="QUALIFIED")
 
+    # 🔗 AJOUTE CETTE FONCTION ICI :
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
 Base.metadata.create_all(bind=engine)
 
 # Auto-migrations SQL
@@ -448,14 +453,21 @@ app = FastAPI(
 @app.get("/")
 def home(request: Request, db: Session = Depends(get_db)):
     try:
-        leads = db.query(LeadModel).order_by(LeadModel.id.desc()).all()
+        # 1. On récupère les leads depuis la BDD
+        raw_leads = db.query(LeadModel).order_by(LeadModel.id.desc()).all()
+        
+        # 2. On les convertit tous en dictionnaires sérialisables en JSON
+        leads_dict = [lead.to_dict() for lead in raw_leads]
+        
+        # 3. On envoie la liste nettoyée au template
         return templates.TemplateResponse(
             request=request, 
             name="dashboard.html", 
-            context={"leads": leads}
+            context={"leads": leads_dict}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/trigger-pipeline")
 def trigger_pipeline(payload: TriggerRequest, background_tasks: BackgroundTasks):
