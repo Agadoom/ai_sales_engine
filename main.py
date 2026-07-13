@@ -296,19 +296,18 @@ Ne mets JAMAIS de crochets comme [Votre Nom] ni d'autres balises génériques.
 """
     user_email = f"Entreprise : {company_name}\nAccroche : {qualification.personalized_hook}"
 
-            res_email = client_openai.beta.chat.completions.parse(
+    res_email = client_openai.beta.chat.completions.parse(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": system_email},
-            {"role": "user", "content": user_email}  # ✅ CORRIGÉ
+            {"role": "user", "content": user_email}
         ],
         response_format=GeneratedEmail
     )
-
-
     email_data = res_email.choices[0].message.parsed
 
     return qualification, email_data
+
 
 # ==========================================
 # 8. PIPELINE PRINCIPAL ENRICHISSEMENT + IA
