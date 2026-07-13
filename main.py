@@ -108,7 +108,8 @@ class ProspectQualification(BaseModel):
 
 class TriggerRequest(BaseModel):
     company_name: str = Field(..., json_schema_extra={"example": "Boulangerie Dupont"})
-    raw_data: str = Field(..., json_schema_extra={"example": "Équipée de 3 gros fours électriques 80kW."})
+    raw_data: Optional[str] = Field(default="Informations non renseignées", json_schema_extra={"example": "Équipée de 3 fours 80kW"})
+
 
 
 class GeneratedEmail(BaseModel):
