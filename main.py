@@ -3,29 +3,12 @@ import time
 import requests
 import uvicorn
 from typing import List, Optional, Literal
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Query
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Query, Request
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 from openai import OpenAI
-from fastapi.templating import Jinja2Templates
-
-
-
-# Définition du dossier de templates Jinja2
-templates = Jinja2Templates(directory="templates")
-
-
-# Endpoint Racine : Servir le Dashboard HTML au lieu du JSON basique
-@app.get("/")
-def home(request: Request):
-    db = SessionLocal()
-    try:
-        leads = db.query(LeadModel).order_by(LeadModel.id.desc()).all()
-        return templates.TemplateResponse("dashboard.html", {"request": request, "leads": leads})
-    finally:
-        db.close()
-
 
 # ==========================================
 # 1. CONFIGURATION ET VARIABLES D'ENVIRONNEMENT
@@ -45,6 +28,9 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
+
+# Initialisation des templates Jinja2 (Assure-toi d'avoir créé le dossier /templates)
+templates = Jinja2Templates(directory="templates")
 
 # ==========================================
 # 2. MODÈLE BASE DE DONNÉES (PostgreSQL)
@@ -127,14 +113,14 @@ def get_avatar_id(headers: dict) -> Optional[str]:
                     if looks:
                         print(f"👤 Look d'avatar trouvé sur le compte : {looks[0].get('look_id')}")
                         return looks[0].get('look_id')
-                
+
                 # 2. Fallback sur l'avatar_id de base si pas de look_id imbriqué
                 for av in avatars:
                     av_id = av.get("avatar_id", "")
                     if "expressive" not in av_id:
                         print(f"👤 Avatar standard trouvé sur le compte : {av_id}")
                         return av_id
-                
+
                 avatar_id = avatars[0].get("avatar_id")
                 print(f"👤 Avatar sélectionné par défaut : {avatar_id}")
                 return avatar_id
@@ -324,7 +310,7 @@ def run_pipeline_task(query: str):
         db.close()
 
 # ==========================================
-# 7. ENDPOINTS FASTAPI (Swagger)
+# 7. ENDPOINTS FASTAPI (App & Router Configuration)
 # ==========================================
 
 app = FastAPI(
@@ -332,9 +318,15 @@ app = FastAPI(
     version="2.0.0"
 )
 
+# Endpoint HTML racine — Connecté proprement à la BDD et placé APRÈS l'initialisation de 'app'
 @app.get("/")
-def home():
-    return {"status": "online", "system": "Dedall Energy Engine v2"}
+def home(request: Request):
+    db = SessionLocal()
+    try:
+        leads = db.query(LeadModel).order_by(LeadModel.id.desc()).all()
+        return templates.TemplateResponse("dashboard.html", {"request": request, "leads": leads})
+    finally:
+        db.close()
 
 @app.post("/trigger-pipeline")
 def trigger_pipeline(payload: TriggerRequest, background_tasks: BackgroundTasks):
