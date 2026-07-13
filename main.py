@@ -345,6 +345,7 @@ def generate_heygen_video(company_name: str, manager_name: str) -> Optional[str]
 # ==========================================
 
 def qualify_and_generate(company_name: str, manager_name: str, raw_data: str):
+    # 1. Étape de qualification inchangée
     system_qualif = (
         "Tu es un expert en qualification B2B pour courtier en énergie. "
         "Évalue le potentiel d'économie d'énergie de l'entreprise."
@@ -361,19 +362,26 @@ def qualify_and_generate(company_name: str, manager_name: str, raw_data: str):
     )
     qualification = res_qualif.choices[0].message.parsed
 
+    # 2. Étape Email : On force une structure HTML ultra-pro et moderne
     salutation_instruction = f"Adresse-toi directement à {manager_name}." if manager_name != "Gérant(e)" else "Adresse-toi au gérant de manière professionnelle."
 
     system_email = f"""
-Tu es un expert en Cold Email B2B pour Dedall Energy. 
-Rédige un email court (3-4 phrases), personnalisé et impactant.
+Tu es un expert en Cold Email B2B et en intégration HTML responsive.
+Rédige un email de prospection court (3-4 phrases), ultra-personnalisé et percutant.
 {salutation_instruction}
 
-RÈGLE IMPÉRATIVE DE SIGNATURE :
-Termine TOUJOURS l'email exactement par cette signature :
-Cordialement,
-Benoît de Dedall Energy
+Génère IMPÉRATIVEMENT le corps du message (body) au format HTML moderne (inline CSS). 
+Utilise une mise en page épurée (fond blanc, texte gris foncé #333333, police sans-serif comme Arial, interligne aéré de 1.6).
 
-Ne mets JAMAIS de crochets comme [Votre Nom] ni d'autres balises génériques.
+Intègre une structure claire avec des paragraphes séparés (<p style="margin-bottom: 16px;">).
+
+RÈGLE IMPÉRATIVE DE SIGNATURE :
+Termine TOUJOURS l'email exactement par cette signature en HTML propre :
+<p style="margin-top: 24px; margin-bottom: 0;">Cordialement,</p>
+<p style="font-weight: bold; color: #1e3a8a; margin: 0;">Benoît</p>
+<p style="font-size: 12px; color: #666666; margin: 0;">Expert Solutions Énergie — Dedall Energy</p>
+
+Ne mets JAMAIS de texte brut de type "--- sent with...", pas de crochets, pas de balises markdown (comme ```html), renvoie directement le code HTML propre.
 """
     user_email = f"Entreprise : {company_name}\nAccroche : {qualification.personalized_hook}"
 
@@ -388,6 +396,7 @@ Ne mets JAMAIS de crochets comme [Votre Nom] ni d'autres balises génériques.
     email_data = res_email.choices[0].message.parsed
 
     return qualification, email_data
+
 
 # ==========================================
 # 8. PIPELINE PRINCIPAL ENRICHISSEMENT + IA
