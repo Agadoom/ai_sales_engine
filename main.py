@@ -61,9 +61,7 @@ Base = declarative_base()
 
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
 
-# ==========================================
-# 3. MODÈLE BASE DE DONNÉES (PostgreSQL)
-# ==========================================
+
 
 # ==========================================
 # 3. MODÈLE BASE DE DONNÉES (PostgreSQL)
@@ -123,22 +121,21 @@ class GeneratedEmail(BaseModel):
 # 5. MODULE D'ENRICHISSEMENT (APIs EXTERNES)
 # ==========================================
 
-def fetch_company_legal_info(search_query: str):
+def fetch_company_legal_info(search_query: str, limit: int = 5):
     """
-    Interroge l'API gouvernementale Data.gouv pour trouver le gérant/dirigeant officiel.
+    Interroge l'API Data.gouv et retourne une liste de prospects (jusqu'à `limit`).
     """
-    print(f"🔍 Recherche d'enrichissement pour : {search_query}")
-    manager_name = "Gérant(e)"
-    full_company_name = search_query
+    print(f"🔍 Recherche multi-prospects pour : '{search_query}' (max {limit})")
+    prospects = []
 
     try:
-        url = f"https://recherche-entreprises.api.gouv.fr/search?q={requests.utils.quote(search_query)}&per_page=1"
+        url = f"https://recherche-entreprises.api.gouv.fr/search?q={requests.utils.quote(search_query)}&per_page={limit}"
         res = requests.get(url, timeout=5)
         if res.status_code == 200:
             results = res.json().get("results", [])
-            if results:
-                company_data = results[0]
-                full_company_name = company_data.get("nom_complet", search_query)
+            for company_data in results:
+                company_name = company_data.get("nom_complet", search_query)
+                manager_name = "Gérant(e)"
                 dirigeants = company_data.get("dirigeants", [])
                 
                 if dirigeants:
@@ -147,11 +144,20 @@ def fetch_company_legal_info(search_query: str):
                     nom = d.get("nom", "").title()
                     if prenom or nom:
                         manager_name = f"{prenom} {nom}".strip()
-                        print(f"👤 Dirigeant trouvé : {manager_name}")
-    except Exception as e:
-        print(f"⚠️ Erreur lors de la recherche SIRENE/Data.gouv : {e}")
 
-    return full_company_name, manager_name
+                prospects.append({
+                    "company_name": company_name,
+                    "manager_name": manager_name
+                })
+    except Exception as e:
+        print(f"⚠️ Erreur lors de la recherche Data.gouv : {e}")
+
+    # Fallback si rien n'est trouvé
+    if not prospects:
+        prospects.append({"company_name": search_query, "manager_name": "Gérant(e)"})
+
+    return prospects
+
 
 # ==========================================
 # 6. MODULE HEYGEN (Génération Vidéo)
@@ -308,39 +314,48 @@ Ne mets JAMAIS de crochets comme [Votre Nom] ni d'autres balises génériques.
 def run_pipeline_task(query: str, raw_data: str):
     db = SessionLocal()
     try:
-        # ÉAPE 1 : Enrichissement automatique (API Gérant / Data.gouv)
-        company_name, manager_name = fetch_company_legal_info(query)
+        # ÉTAPE 1 : Récupérer jusqu'à 5 entreprises correspondant à la recherche
+        prospects = fetch_company_legal_info(query, limit=5)
+        print(f"🎯 {len(prospects)} prospect(s) trouvé(s) pour '{query}'")
 
-        # ÉTAPE 2 : Qualification + Email sur mesure
-        qualif, email_info = qualify_and_generate(company_name, manager_name, raw_data)
+        # ÉTAPE 2 : Traiter chaque prospect un par un
+        for p in prospects:
+            company_name = p["company_name"]
+            manager_name = p["manager_name"]
 
-        # ÉTAPE 3 : Vidéo personnalisée (si score >= 7)
-        v_url = None
-        if qualif.priority_score >= 7:
-            v_url = generate_heygen_video(company_name, manager_name)
+            print(f"\n⚡ Traitement de : {company_name} (Dirigeant : {manager_name})")
 
-        # ÉTAPE 4 : Sauvegarde BDD
-        lead = LeadModel(
-            company_name=company_name,
-            manager_name=manager_name,
-            raw_data=raw_data,
-            energy_intensity=qualif.energy_intensity,
-            priority_score=qualif.priority_score,
-            personalized_hook=qualif.personalized_hook,
-            email_subject=email_info.subject,
-            email_body=email_info.body,
-            video_url=v_url,
-            status="QUALIFIED"
-        )
-        db.add(lead)
-        db.commit()
-        print(f"💾 Prospect enrichi & sauvegardé : {company_name} | Dirigeant : {manager_name} | Score : {qualif.priority_score}")
+            # Qualification + Email
+            qualif, email_info = qualify_and_generate(company_name, manager_name, raw_data)
+
+            # Vidéo (si score >= 7)
+            v_url = None
+            if qualif.priority_score >= 7:
+                v_url = generate_heygen_video(company_name, manager_name)
+
+            # Sauvegarde BDD
+            lead = LeadModel(
+                company_name=company_name,
+                manager_name=manager_name,
+                raw_data=raw_data,
+                energy_intensity=qualif.energy_intensity,
+                priority_score=qualif.priority_score,
+                personalized_hook=qualif.personalized_hook,
+                email_subject=email_info.subject,
+                email_body=email_info.body,
+                video_url=v_url,
+                status="QUALIFIED"
+            )
+            db.add(lead)
+            db.commit()
+            print(f"💾 Prospect sauvegardé : {company_name} (Score: {qualif.priority_score})")
 
     except Exception as e:
         print(f"❌ Erreur pendant le pipeline : {e}")
         db.rollback()
     finally:
         db.close()
+
 
 # ==========================================
 # 9. ENDPOINTS FASTAPI
