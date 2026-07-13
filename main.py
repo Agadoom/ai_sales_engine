@@ -10,15 +10,15 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, Da
 from sqlalchemy.orm import declarative_base, sessionmaker
 from openai import OpenAI
 import json
+from fastapi.templating import Jinja2Templates
 
-# Initialisation des templates Jinja2
+# 1. Initialisation des templates
 templates = Jinja2Templates(directory="templates")
 
-# ✅ Ajouter le filtre custom 'escapejs' à Jinja2
+# 2. Définition et enregistrement du filtre 'escapejs'
 def escapejs_filter(val):
     if val is None:
         return ""
-    # Encode en JSON et retire les guillemets de début/fin
     return json.dumps(str(val))[1:-1]
 
 templates.env.filters["escapejs"] = escapejs_filter
