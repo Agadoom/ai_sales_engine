@@ -1,26 +1,27 @@
 import os
 import time
+import json
+import secrets
 import requests
 import uvicorn
 from typing import List, Optional, Literal
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Query, Request
+
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Query, Request, Depends
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 from openai import OpenAI
-import json
-import secrets # Pour une comparaison de chaînes sécurisée
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Query, Request, Depends
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.templating import Jinja2Templates
 
-# Définition de la sécurité
+# ==========================================
+# 1. AUTHENTIFICATION & SÉCURITÉ
+# ==========================================
+
 security = HTTPBasic()
 
-# 🔐 Définis tes identifiants ici (Idéalement via variables d'environnement os.getenv)
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "DedallEnergy2026!") 
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "DedallEnergy2026!")
 
 def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
     correct_username = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
@@ -34,20 +35,18 @@ def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
     return credentials.username
 
 # ==========================================
-# 1. CONFIGURATION ET TEMPLATES
+# 2. CONFIGURATION ET TEMPLATES JINJA2
 # ==========================================
 
-# ✅ Unique initialisation des templates
 templates = Jinja2Templates(directory="templates")
 
-# ✅ Enregistrement du filtre 'escapejs'
+# Filtre personnalisé 'escapejs' pour éviter les crashs Jinja2 dans les modals JS
 def escapejs_filter(val):
     if val is None:
         return ""
     return json.dumps(str(val))[1:-1]
 
 templates.env.filters["escapejs"] = escapejs_filter
-
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -64,16 +63,8 @@ Base = declarative_base()
 
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
 
-# ❌ LA LIGNE COMPLÈTEMENT SUPPRIMÉE ICI POUR ÉVITER D'ÉCRASER LE FILTRE
-
 # ==========================================
-# 2. MODÈLE BASE DE DONNÉES (PostgreSQL)
-# ==========================================
-# ... Reste du code inchangé
-
-
-# ==========================================
-# 2. MODÈLE BASE DE DONNÉES (PostgreSQL)
+# 3. MODÈLE BASE DE DONNÉES (PostgreSQL)
 # ==========================================
 
 class LeadModel(Base):
@@ -91,11 +82,11 @@ class LeadModel(Base):
     video_url = Column(Text, nullable=True)
     status = Column(String, default="QUALIFIED")  # QUALIFIED, SENT, FAILED
 
-# Création des tables
+# Création automatique des tables
 Base.metadata.create_all(bind=engine)
 
 # ==========================================
-# 3. STRUCTURES DE DONNÉES (Pydantic Models)
+# 4. STRUCTURES DE DONNÉES (Pydantic Models)
 # ==========================================
 
 class ProspectQualification(BaseModel):
@@ -108,22 +99,21 @@ class ProspectQualification(BaseModel):
 
 class TriggerRequest(BaseModel):
     company_name: str = Field(..., json_schema_extra={"example": "Boulangerie Dupont"})
-    raw_data: Optional[str] = Field(default="Informations non renseignées", json_schema_extra={"example": "Équipée de 3 fours 80kW"})
-
-
+    raw_data: Optional[str] = Field(
+        default="Informations non renseignées", 
+        json_schema_extra={"example": "Équipée de 3 gros fours électriques 80kW."}
+    )
 
 class GeneratedEmail(BaseModel):
     subject: str
     body: str
 
 # ==========================================
-# 4. MODULE HEYGEN (Génération Vidéo)
+# 5. MODULE HEYGEN (Génération Vidéo)
 # ==========================================
 
 def get_french_voice_id(headers: dict) -> Optional[str]:
-    """
-    Interroge l'API HeyGen pour obtenir un voice_id français valide disponible sur le compte.
-    """
+    """Interroge l'API HeyGen pour obtenir un voice_id français valide."""
     try:
         res = requests.get("https://api.heygen.com/v2/voices", headers=headers)
         if res.status_code == 200:
@@ -142,22 +132,18 @@ def get_french_voice_id(headers: dict) -> Optional[str]:
 
 
 def get_avatar_id(headers: dict) -> Optional[str]:
-    """
-    Interroge l'API HeyGen pour récupérer un avatar compatible sur l'espace de travail.
-    """
+    """Interroge l'API HeyGen pour récupérer un avatar compatible."""
     try:
         res = requests.get("https://api.heygen.com/v2/avatars", headers=headers)
         if res.status_code == 200:
             avatars = res.json().get("data", {}).get("avatars", [])
             if avatars:
-                # 1. On cherche en priorité un look_id stable (souvent requis pour les avatars v2 custom)
                 for av in avatars:
                     looks = av.get("looks", [])
                     if looks:
                         print(f"👤 Look d'avatar trouvé sur le compte : {looks[0].get('look_id')}")
                         return looks[0].get('look_id')
 
-                # 2. Fallback sur l'avatar_id de base si pas de look_id imbriqué
                 for av in avatars:
                     av_id = av.get("avatar_id", "")
                     if "expressive" not in av_id:
@@ -173,9 +159,7 @@ def get_avatar_id(headers: dict) -> Optional[str]:
 
 
 def generate_heygen_video(company_name: str) -> Optional[str]:
-    """
-    Génère une vidéo personnalisée via l'API HeyGen V2 nettoyée et dynamique.
-    """
+    """Génère une vidéo personnalisée via l'API HeyGen V2."""
     if not HEYGEN_API_KEY:
         print("⚠️ HEYGEN_API_KEY non fournie, étape vidéo ignorée.")
         return None
@@ -185,7 +169,6 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
         "Content-Type": "application/json"
     }
 
-    # Récupération dynamique des ressources valides de ton compte
     voice_id = get_french_voice_id(headers)
     avatar_id = get_avatar_id(headers)
 
@@ -200,7 +183,6 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
         f"Regardons ensemble comment Dedall Energy peut vous accompagner."
     )
 
-    # Payload V2 propre et dynamique
     payload = {
         "video_inputs": [
             {
@@ -261,13 +243,11 @@ def generate_heygen_video(company_name: str) -> Optional[str]:
         return None
 
 # ==========================================
-# 5. MODULE DE QUALIFICATION ET EMAIL (IA)
+# 6. MODULE DE QUALIFICATION ET EMAIL (IA)
 # ==========================================
 
 def qualify_and_generate(company_name: str, raw_data: str):
-    """
-    Qualifie le prospect et rédige un email sur-mesure signé Billel de Dedall Energy.
-    """
+    """Qualifie le prospect et rédige un email sur-mesure."""
     system_qualif = (
         "Tu es un expert en qualification B2B pour courtier en énergie. "
         "Évalue le potentiel d'économie d'énergie de l'entreprise."
@@ -310,13 +290,13 @@ Ne mets JAMAIS de crochets comme [Votre Nom] ni d'autres balises génériques.
     return qualification, email_data
 
 # ==========================================
-# 6. PIPELINE PRINCIPAL (Background Task)
+# 7. PIPELINE PRINCIPAL (Background Task)
 # ==========================================
 
 def run_pipeline_task(company_name: str, raw_data: str):
+    """Exécute la qualification, la génération vidéo et la sauvegarde pour UN SEUL prospect."""
     db = SessionLocal()
     try:
-        # On utilise directement les vraies données reçues sans faire de boucle de mocks !
         qualif, email_info = qualify_and_generate(company_name, raw_data)
 
         v_url = None
@@ -344,9 +324,8 @@ def run_pipeline_task(company_name: str, raw_data: str):
     finally:
         db.close()
 
-
 # ==========================================
-# 7. ENDPOINTS FASTAPI (App & Router Configuration)
+# 8. ENDPOINTS FASTAPI
 # ==========================================
 
 app = FastAPI(
@@ -354,8 +333,7 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# Endpoint HTML racine — Correctement formaté pour les versions récentes de FastAPI/Starlette
-# Endpoint HTML racine sécurisé
+# Dashboard HTML sécurisé via HTTP Basic Auth
 @app.get("/")
 def home(request: Request, username: str = Depends(get_current_user)):
     db = SessionLocal()
@@ -370,10 +348,8 @@ def home(request: Request, username: str = Depends(get_current_user)):
         db.close()
 
 
-
 @app.post("/trigger-pipeline")
 def trigger_pipeline(payload: TriggerRequest, background_tasks: BackgroundTasks):
-    # On passe les deux arguments distincts à la fonction en tâche de fond
     background_tasks.add_task(run_pipeline_task, payload.company_name, payload.raw_data)
     return {"message": f"Pipeline lancé en tâche de fond pour l'entreprise : '{payload.company_name}'"}
 
@@ -418,7 +394,7 @@ def send_pending_leads(min_score: int = Query(7, ge=1, le=10)):
         db.close()
 
 # ==========================================
-# 8. ÉTAPE DE DÉMARRAGE DU SERVEUR
+# 9. DÉMARRAGE DU SERVEUR
 # ==========================================
 
 if __name__ == "__main__":
