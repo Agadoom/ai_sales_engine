@@ -10,12 +10,15 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, Da
 from sqlalchemy.orm import declarative_base, sessionmaker
 from openai import OpenAI
 import json
-from fastapi.templating import Jinja2Templates
 
-# 1. Initialisation des templates
+# ==========================================
+# 1. CONFIGURATION ET TEMPLATES
+# ==========================================
+
+# ✅ Unique initialisation des templates
 templates = Jinja2Templates(directory="templates")
 
-# 2. Définition et enregistrement du filtre 'escapejs'
+# ✅ Enregistrement du filtre 'escapejs'
 def escapejs_filter(val):
     if val is None:
         return ""
@@ -23,10 +26,6 @@ def escapejs_filter(val):
 
 templates.env.filters["escapejs"] = escapejs_filter
 
-
-# ==========================================
-# 1. CONFIGURATION ET VARIABLES D'ENVIRONNEMENT
-# ==========================================
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -43,8 +42,13 @@ Base = declarative_base()
 
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
 
-# Initialisation des templates Jinja2 (Assure-toi d'avoir créé le dossier /templates)
-templates = Jinja2Templates(directory="templates")
+# ❌ LA LIGNE COMPLÈTEMENT SUPPRIMÉE ICI POUR ÉVITER D'ÉCRASER LE FILTRE
+
+# ==========================================
+# 2. MODÈLE BASE DE DONNÉES (PostgreSQL)
+# ==========================================
+# ... Reste du code inchangé
+
 
 # ==========================================
 # 2. MODÈLE BASE DE DONNÉES (PostgreSQL)
