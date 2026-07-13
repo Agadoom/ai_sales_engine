@@ -8,6 +8,24 @@ from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 from openai import OpenAI
+from fastapi.templating import Jinja2Templates
+
+
+
+# Définition du dossier de templates Jinja2
+templates = Jinja2Templates(directory="templates")
+
+
+# Endpoint Racine : Servir le Dashboard HTML au lieu du JSON basique
+@app.get("/")
+def home(request: Request):
+    db = SessionLocal()
+    try:
+        leads = db.query(LeadModel).order_by(LeadModel.id.desc()).all()
+        return templates.TemplateResponse("dashboard.html", {"request": request, "leads": leads})
+    finally:
+        db.close()
+
 
 # ==========================================
 # 1. CONFIGURATION ET VARIABLES D'ENVIRONNEMENT
