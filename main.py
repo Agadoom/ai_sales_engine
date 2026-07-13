@@ -318,15 +318,21 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# Endpoint HTML racine — Connecté proprement à la BDD et placé APRÈS l'initialisation de 'app'
+# Endpoint HTML racine — Correctement formaté pour les versions récentes de FastAPI/Starlette
 @app.get("/")
 def home(request: Request):
     db = SessionLocal()
     try:
         leads = db.query(LeadModel).order_by(LeadModel.id.desc()).all()
-        return templates.TemplateResponse("dashboard.html", {"request": request, "leads": leads})
+        # ✅ NOUVELLE SYNTAXE : request en premier (ou nommé explicitement)
+        return templates.TemplateResponse(
+            request=request, 
+            name="dashboard.html", 
+            context={"leads": leads}
+        )
     finally:
         db.close()
+
 
 @app.post("/trigger-pipeline")
 def trigger_pipeline(payload: TriggerRequest, background_tasks: BackgroundTasks):
