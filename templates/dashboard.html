@@ -1,117 +1,152 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" class="h-full bg-slate-900 text-slate-100">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dedall Energy — Outreach Dashboard</title>
+    <title>Dedall Energy - Automated Outreach Engine</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+    </style>
 </head>
-<body class="bg-slate-900 text-slate-100 font-sans min-h-screen">
+<body class="h-full flex flex-col">
 
-    <header class="border-b border-slate-800 bg-slate-950/50 backdrop-blur sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
-            <div class="flex items-center gap-3">
-                <span class="text-2xl">⚡</span>
-                <h1 class="text-xl font-bold bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">
-                    Dedall Energy Engine
-                </h1>
-            </div>
-            <div class="flex items-center gap-2">
-                <span class="w-3 h-3 bg-emerald-500 rounded-full animate-pulse"></span>
-                <span class="text-sm font-medium text-slate-400">Système opérationnel</span>
+    <header class="bg-slate-800 border-b border-slate-700 sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-3">
+                    <div class="bg-indigo-600 p-2 rounded-lg text-white font-bold">
+                        <i class="fa-solid fa-bolt text-xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-lg font-bold text-white tracking-wide">Dedall Energy</h1>
+                        <p class="text-xs text-slate-400">Outreach Engine B2B</p>
+                    </div>
+                </div>
+
+                <button onclick="triggerSendLeads()" class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm px-4 py-2 rounded-lg transition-all shadow-lg shadow-emerald-900/20">
+                    <i class="fa-solid fa-paper-plane"></i>
+                    Envoyer les Leads Validés
+                </button>
             </div>
         </div>
     </header>
 
-    <main class="max-w-7xl mx-auto px-6 py-8 space-y-8">
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-            
-            <div class="md:col-span-2 bg-slate-800/50 border border-slate-700/50 rounded-xl p-6 shadow-xl">
-                <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <i class="fa-solid fa-magnifying-glass text-amber-400"></i> Lancer une recherche de prospects
-                </h2>
-                <form id="triggerForm" class="flex gap-3">
-                    <input type="text" id="queryInput" placeholder="Ex: Boulangerie Lyon, Pressing Marseille..." 
-                        class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-amber-400 text-slate-100" required>
-                    <button type="submit" id="triggerBtn"
-                        class="bg-amber-500 hover:bg-amber-600 font-semibold px-6 py-3 rounded-lg text-slate-950 text-sm transition flex items-center gap-2">
-                        <span>Lancer le Pipeline</span>
-                        <i class="fa-solid fa-rocket"></i>
-                    </button>
-                </form>
-                <p id="statusMsg" class="mt-3 text-xs hidden"></p>
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-5 backdrop-blur-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-sm font-medium text-slate-400">Total Prospects</span>
+                    <i class="fa-solid fa-users text-indigo-400"></i>
+                </div>
+                <div class="mt-2 text-2xl font-bold text-white" id="stat-total">{{ leads|length }}</div>
             </div>
 
-            <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6 shadow-xl flex flex-col justify-between">
-                <div>
-                    <h2 class="text-lg font-semibold mb-2 flex items-center gap-2">
-                        <i class="fa-solid fa-paper-plane text-orange-400"></i> Envoi Webhook
-                    </h2>
-                    <p class="text-xs text-slate-400 mb-4">Transférer automatiquement les leads qualifiés (Score ≥ 7) vers Outreach.</p>
+            <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-5 backdrop-blur-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-sm font-medium text-slate-400">En Attente (Qualifiés)</span>
+                    <i class="fa-solid fa-clock text-amber-400"></i>
                 </div>
-                <button onclick="sendPendingLeads()" 
-                    class="w-full bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 font-medium py-3 rounded-lg text-sm transition flex justify-center items-center gap-2">
-                    <i class="fa-solid fa-share-nodes"></i> Envoyer les leads qualifiés
+                <div class="mt-2 text-2xl font-bold text-amber-400">
+                    {{ leads | selectattr("status", "equalto", "QUALIFIED") | list | length }}
+                </div>
+            </div>
+
+            <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-5 backdrop-blur-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-sm font-medium text-slate-400">Envoyés</span>
+                    <i class="fa-solid fa-check-circle text-emerald-400"></i>
+                </div>
+                <div class="mt-2 text-2xl font-bold text-emerald-400">
+                    {{ leads | selectattr("status", "equalto", "SENT") | list | length }}
+                </div>
+            </div>
+
+            <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-5 backdrop-blur-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-sm font-medium text-slate-400">Région</span>
+                    <i class="fa-solid fa-location-dot text-rose-400"></i>
+                </div>
+                <div class="mt-2 text-lg font-bold text-white">Rhône-Alpes</div>
+            </div>
+        </div>
+
+        <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-6 space-y-4">
+            <h2 class="text-md font-semibold text-white flex items-center gap-2">
+                <i class="fa-solid fa-magnifying-glass text-indigo-400"></i> Lancer une nouvelle recherche
+            </h2>
+            <div class="flex flex-col sm:flex-row gap-3">
+                <input type="text" id="searchQuery" placeholder="Ex: Boulangerie Lyon, Pressing Grenoble..." class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <button onclick="triggerPipeline()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-6 py-2.5 rounded-lg text-sm transition-all flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-robot"></i> Lancer le Pipeline
                 </button>
             </div>
         </div>
 
-        <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl shadow-xl overflow-hidden">
-            <div class="px-6 py-4 border-b border-slate-700/50 flex justify-between items-center">
-                <h2 class="text-lg font-semibold flex items-center gap-2">
-                    <i class="fa-solid fa-users text-slate-400"></i> Prospects identifiés ({{ leads|length }})
-                </h2>
-                <span class="text-xs text-slate-400">Mise à jour dynamique</span>
+        <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl overflow-hidden shadow-xl">
+            <div class="p-4 border-b border-slate-700/60 flex flex-col sm:flex-row justify-between items-center gap-4">
+                <h3 class="text-md font-semibold text-white">Base de Prospects</h3>
+                <input type="text" id="filterTable" onkeyup="filterLeads()" placeholder="Filtrer dans la liste..." class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 w-full sm:w-64 focus:outline-none focus:ring-1 focus:ring-indigo-500">
             </div>
 
             <div class="overflow-x-auto">
-                <table class="w-full text-left text-sm text-slate-300">
-                    <thead class="bg-slate-900/50 text-xs uppercase text-slate-400 border-b border-slate-700/50">
+                <table class="w-full text-left text-sm text-slate-300" id="leadsTable">
+                    <thead class="bg-slate-900/60 text-xs uppercase tracking-wider text-slate-400 border-b border-slate-700/60">
                         <tr>
-                            <th class="px-6 py-3">ID</th>
-                            <th class="px-6 py-3">Entreprise</th>
-                            <th class="px-6 py-3">Intensité</th>
-                            <th class="px-6 py-3">Score</th>
-                            <th class="px-6 py-3">Statut</th>
-                            <th class="px-6 py-3 text-right">Action</th>
+                            <th class="py-3.5 px-4">Entreprise</th>
+                            <th class="py-3.5 px-4">Gérant / Contact</th>
+                            <th class="py-3.5 px-4">Consommation</th>
+                            <th class="py-3.5 px-4 text-center">Score</th>
+                            <th class="py-3.5 px-4 text-center">Statut</th>
+                            <th class="py-3.5 px-4 text-right">Actions</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-slate-700/30">
+                    <tbody class="divide-y divide-slate-700/40">
                         {% for lead in leads %}
-                        <tr class="hover:bg-slate-800/40 transition">
-                            <td class="px-6 py-4 font-mono text-xs text-slate-500">#{{ lead.id }}</td>
-                            <td class="px-6 py-4 font-medium text-slate-100">{{ lead.company_name }}</td>
-                            <td class="px-6 py-4">
+                        <tr class="hover:bg-slate-700/30 transition-colors">
+                            <td class="py-3.5 px-4 font-medium text-white">
+                                {{ lead.company_name }}
+                                <div class="text-xs text-slate-400 font-normal">{{ lead.address or 'Rhône-Alpes' }}</div>
+                            </td>
+                            <td class="py-3.5 px-4">
+                                <div class="text-white">{{ lead.manager_name or 'Non spécifié' }}</div>
+                                <div class="text-xs text-indigo-400">{{ lead.email or 'Pas d\'email' }}</div>
+                            </td>
+                            <td class="py-3.5 px-4">
                                 {% if lead.energy_intensity == 'HIGH' %}
-                                    <span class="bg-red-500/10 text-red-400 border border-red-500/20 text-xs px-2.5 py-1 rounded-full font-medium">ÉLEVÉE</span>
+                                    <span class="px-2 py-0.5 rounded text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">FORTE</span>
+                                {% elif lead.energy_intensity == 'MEDIUM' %}
+                                    <span class="px-2 py-0.5 rounded text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">MOYENNE</span>
                                 {% else %}
-                                    <span class="bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs px-2.5 py-1 rounded-full font-medium">MOYENNE</span>
+                                    <span class="px-2 py-0.5 rounded text-xs font-semibold bg-slate-500/10 text-slate-400 border border-slate-500/20">FAIBLE</span>
                                 {% endif %}
                             </td>
-                            <td class="px-6 py-4">
-                                <div class="flex items-center gap-2">
-                                    <span class="font-bold text-amber-400">{{ lead.priority_score }}</span><span class="text-xs text-slate-500">/10</span>
-                                </div>
+                            <td class="py-3.5 px-4 text-center">
+                                <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold {% if lead.priority_score >= 8 %}bg-emerald-500/20 text-emerald-400 border border-emerald-500/30{% else %}bg-slate-700 text-slate-300{% endif %}">
+                                    {{ lead.priority_score }}
+                                </span>
                             </td>
-                            <td class="px-6 py-4">
+                            <td class="py-3.5 px-4 text-center">
                                 {% if lead.status == 'SENT' %}
-                                    <span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs px-2.5 py-1 rounded-full">ENVOYÉ</span>
+                                    <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">ENVOYÉ</span>
                                 {% else %}
-                                    <span class="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs px-2.5 py-1 rounded-full">QUALIFIÉ</span>
+                                    <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">QUALIFIÉ</span>
                                 {% endif %}
                             </td>
-                            <td class="px-6 py-4 text-right">
-                                <button onclick="openModal('{{ lead.company_name|escapejs }}', '{{ lead.email_subject|escapejs }}', '{{ lead.email_body|escapejs }}', '{{ lead.video_url or '' }}')" 
-                                    class="bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs px-3 py-1.5 rounded-lg border border-slate-600 transition">
-                                    Examiner
+                            <td class="py-3.5 px-4 text-right">
+                                <button onclick='openModal({{ lead | tojson }})' class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 rounded text-xs transition-all">
+                                    <i class="fa-solid fa-eye"></i> Aperçu
                                 </button>
                             </td>
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="6" class="px-6 py-8 text-center text-slate-500">Aucun prospect enregistré pour le moment.</td>
+                            <td colspan="6" class="py-8 text-center text-slate-500">
+                                Aucun prospect trouvé dans la base de données.
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -120,99 +155,109 @@
         </div>
     </main>
 
-    <div id="leadModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
-        <div class="bg-slate-800 border border-slate-700 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-6">
-            <div class="flex justify-between items-center border-b border-slate-700 pb-4">
-                <h3 id="modalCompany" class="text-xl font-bold text-slate-100">Détails du Prospect</h3>
-                <button onclick="closeModal()" class="text-slate-400 hover:text-slate-200"><i class="fa-solid fa-xmark text-lg"></i></button>
+    <div id="previewModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-800 border border-slate-700 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl p-6 space-y-5">
+            <div class="flex justify-between items-start border-b border-slate-700 pb-4">
+                <div>
+                    <h3 class="text-lg font-bold text-white" id="modalCompany">Nom Entreprise</h3>
+                    <p class="text-xs text-indigo-400" id="modalManager">Gérant</p>
+                </div>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-xl"></i></button>
             </div>
 
-            <div class="space-y-2">
-                <h4 class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Email généré par l'IA</h4>
-                <div class="bg-slate-900 border border-slate-700/60 rounded-xl p-4 text-sm space-y-2">
-                    <p class="font-semibold text-amber-400">Objet : <span id="modalSubject" class="text-slate-200 font-normal"></span></p>
-                    <hr class="border-slate-800">
-                    <p id="modalBody" class="text-slate-300 whitespace-pre-line leading-relaxed"></p>
+            <div class="space-y-3">
+                <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-700/50 text-xs space-y-1">
+                    <div><span class="text-slate-400">Email :</span> <span id="modalEmail" class="text-white font-mono"></span></div>
+                    <div><span class="text-slate-400">Adresse :</span> <span id="modalAddress" class="text-white"></span></div>
+                </div>
+
+                <div>
+                    <label class="text-xs text-slate-400 font-semibold uppercase">Sujet du mail</label>
+                    <div id="modalSubject" class="bg-slate-900 p-3 rounded-lg text-sm text-white font-medium border border-slate-700/50 mt-1"></div>
+                </div>
+
+                <div>
+                    <label class="text-xs text-slate-400 font-semibold uppercase">Corps du message</label>
+                    <div id="modalBody" class="bg-slate-900 p-3 rounded-lg text-sm text-slate-200 border border-slate-700/50 mt-1 whitespace-pre-line"></div>
+                </div>
+
+                <div id="modalVideoContainer" class="hidden">
+                    <label class="text-xs text-slate-400 font-semibold uppercase">Vidéo HeyGen</label>
+                    <div class="mt-1">
+                        <a id="modalVideoLink" href="#" target="_blank" class="inline-flex items-center gap-2 text-xs bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 px-3 py-2 rounded-lg hover:bg-indigo-600/30">
+                            <i class="fa-solid fa-video"></i> Regarder la vidéo générée
+                        </a>
+                    </div>
                 </div>
             </div>
 
-            <div class="space-y-2">
-                <h4 class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Vidéo Personnalisée (HeyGen)</h4>
-                <div id="videoContainer" class="bg-slate-900 border border-slate-700/60 rounded-xl p-4 text-center">
-                    </div>
-            </div>
-
-            <div class="flex justify-end pt-2">
-                <button onclick="closeModal()" class="bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm px-5 py-2 rounded-lg transition">Fermer</button>
+            <div class="flex justify-end pt-4 border-t border-slate-700">
+                <button onclick="closeModal()" class="bg-slate-700 hover:bg-slate-600 text-white text-xs px-4 py-2 rounded-lg">Fermer</button>
             </div>
         </div>
     </div>
 
     <script>
-        // Trigger Pipeline
-        document.getElementById('triggerForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const query = document.getElementById('queryInput').value;
-            const btn = document.getElementById('triggerBtn');
-            const msg = document.getElementById('statusMsg');
+        function triggerPipeline() {
+            const query = document.getElementById("searchQuery").value;
+            if(!query) return alert("Veuillez saisir un terme de recherche.");
 
-            btn.disabled = true;
-            btn.classList.add('opacity-50');
-            msg.className = "mt-3 text-xs text-amber-400 block";
-            msg.innerText = "⏳ Lancement du pipeline en tâche de fond...";
+            fetch("/trigger-pipeline", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query: query })
+            })
+            .then(res => res.json())
+            .then(data => {
+                alert(data.message);
+                location.reload();
+            })
+            .catch(err => alert("Erreur : " + err));
+        }
 
-            try {
-                const res = await fetch('/trigger-pipeline', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({query: query})
-                });
-                if(res.ok) {
-                    msg.className = "mt-3 text-xs text-emerald-400 block";
-                    msg.innerText = "✅ Pipeline démarré ! Les prospects vont apparaître d'ici quelques secondes.";
-                    setTimeout(() => location.reload(), 4000);
-                } else {
-                    msg.className = "mt-3 text-xs text-red-400 block";
-                    msg.innerText = "❌ Erreur lors du lancement.";
-                }
-            } catch(err) {
-                msg.className = "mt-3 text-xs text-red-400 block";
-                msg.innerText = "❌ Impossible de joindre le serveur.";
-            } finally {
-                btn.disabled = false;
-                btn.classList.remove('opacity-50');
-            }
-        });
+        function triggerSendLeads() {
+            if(!confirm("Voulez-vous envoyer tous les leads qualifiés au Webhook ?")) return;
 
-        // Modale
-        function openModal(company, subject, body, videoUrl) {
-            document.getElementById('modalCompany').innerText = company;
-            document.getElementById('modalSubject').innerText = subject;
-            document.getElementById('modalBody').innerText = body;
+            fetch("/send-pending-leads?min_score=7", { method: "POST" })
+            .then(res => res.json())
+            .then(data => {
+                alert(`Succès : ${data.sent_count} lead(s) envoyé(s) !`);
+                location.reload();
+            })
+            .catch(err => alert("Erreur lors de l'envoi : " + err));
+        }
 
-            const videoBox = document.getElementById('videoContainer');
-            if(videoUrl && videoUrl !== 'None' && videoUrl !== '') {
-                videoBox.innerHTML = `<video controls class="w-full rounded-lg max-h-64"><source src="${videoUrl}" type="video/mp4"></video>`;
+        function filterLeads() {
+            const input = document.getElementById("filterTable").value.toLowerCase();
+            const rows = document.querySelectorAll("#leadsTable tbody tr");
+            rows.forEach(row => {
+                const text = row.innerText.toLowerCase();
+                row.style.display = text.includes(input) ? "" : "none";
+            });
+        }
+
+        function openModal(lead) {
+            document.getElementById("modalCompany").innerText = lead.company_name;
+            document.getElementById("modalManager").innerText = "Gérant : " + (lead.manager_name || "N/A");
+            document.getElementById("modalEmail").innerText = lead.email || "Non trouvé";
+            document.getElementById("modalAddress").innerText = lead.address || "N/A";
+            document.getElementById("modalSubject").innerText = lead.email_subject || "";
+            document.getElementById("modalBody").innerText = lead.email_body || "";
+
+            const videoContainer = document.getElementById("modalVideoContainer");
+            const videoLink = document.getElementById("modalVideoLink");
+            if(lead.video_url) {
+                videoLink.href = lead.video_url;
+                videoContainer.classList.remove("hidden");
             } else {
-                videoBox.innerHTML = `<p class="text-slate-500 text-xs py-4">Pas de vidéo disponible (Vérifier le solde de crédits HeyGen ou le score de priorité).</p>`;
+                videoContainer.classList.add("hidden");
             }
 
-            document.getElementById('leadModal').classList.remove('hidden');
-            document.getElementById('leadModal').classList.add('flex');
+            document.getElementById("previewModal").classList.remove("hidden");
         }
 
         function closeModal() {
-            document.getElementById('leadModal').classList.add('hidden');
-            document.getElementById('leadModal').classList.remove('flex');
-        }
-
-        async function sendPendingLeads() {
-            if(confirm("Envoyer tous les leads qualifiés vers Outreach ?")) {
-                const res = await fetch('/send-pending-leads?min_score=7', {method: 'POST'});
-                const data = await res.json();
-                alert(`Résultat : ${data.message} (${data.sent_count || 0} envoyés)`);
-                location.reload();
-            }
+            document.getElementById("previewModal").classList.add("hidden");
         }
     </script>
 </body>
