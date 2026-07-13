@@ -237,54 +237,37 @@ def fetch_company_legal_info(search_query: str, limit: int = 5):
     return prospects
 
 
-def fetch_manager_email_dropcontact(manager_name: str, company_name: str) -> Optional[str]:
+def fetch_manager_email_hunter(manager_name: str, company_name: str) -> Optional[str]:
     """
-    Interroge l'API Dropcontact pour retrouver l'email nominatif du gérant.
+    Recherche l'adresse e-mail professionnelle via l'API Hunter.io
     """
-    if not DROPCONTACT_API_KEY:
-        print("⚠️ DROPCONTACT_API_KEY non configurée.")
+    if not HUNTER_API_KEY:
+        print("⚠️ HUNTER_API_KEY non configurée.")
         return None
 
-    headers = {
-        "X-Access-Token": DROPCONTACT_API_KEY,
-        "Content-Type": "application/json"
-    }
-
-    # Découpage rapide du prénom/nom s'il est connu
+    # Extraction prénom / nom
     parts = manager_name.split(" ")
     first_name = parts[0] if len(parts) > 0 else ""
     last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
 
-    payload = {
-        "data": [
-            {
-                "first_name": first_name,
-                "last_name": last_name,
-                "company": company_name
-            }
-        ]
-    }
-
     try:
-        # Envoi de la demande d'enrichissement
-        res = requests.post("https://api.dropcontact.io/batch", json=payload, headers=headers)
+        # Recherche du domaine de l'entreprise ou email direct
+        url = (
+            f"https://api.hunter.io/v2/email-finder?"
+            f"company={requests.utils.quote(company_name)}"
+            f"&first_name={requests.utils.quote(first_name)}"
+            f"&last_name={requests.utils.quote(last_name)}"
+            f"&api_key={HUNTER_API_KEY}"
+        )
+        res = requests.get(url, timeout=5)
         if res.status_code == 200:
-            request_id = res.json().get("request_id")
-            
-            # Dropcontact traite la demande de manière asynchrone (attente de 3-5 secondes)
-            for _ in range(5):
-                time.sleep(3)
-                poll_res = requests.get(f"https://api.dropcontact.io/batch/{request_id}", headers=headers)
-                if poll_res.status_code == 200:
-                    data = poll_res.json()
-                    if data.get("success"):
-                        results = data.get("data", [])
-                        if results and "email" in results[0]:
-                            email = results[0]["email"][0].get("email")
-                            print(f"📧 Email trouvé via Dropcontact : {email}")
-                            return email
+            data = res.json().get("data", {})
+            email = data.get("email")
+            if email:
+                print(f"📧 Email trouvé via Hunter.io : {email}")
+                return email
     except Exception as e:
-        print(f"⚠️ Erreur lors de l'appel Dropcontact : {e}")
+        print(f"⚠️ Erreur Hunter.io : {e}")
 
     return None
 
