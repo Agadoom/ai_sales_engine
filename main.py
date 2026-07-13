@@ -65,12 +65,17 @@ client_openai = OpenAI(api_key=OPENAI_API_KEY)
 # 3. MODÈLE BASE DE DONNÉES (PostgreSQL)
 # ==========================================
 
+# ==========================================
+# 3. MODÈLE BASE DE DONNÉES (PostgreSQL)
+# ==========================================
+from sqlalchemy import text
+
 class LeadModel(Base):
     __tablename__ = "leads"
 
     id = Column(Integer, primary_key=True, index=True)
     company_name = Column(String, nullable=False)
-    manager_name = Column(String, nullable=True) # 👈 Nom du gérant ajouté
+    manager_name = Column(String, nullable=True)  # 👈 Nouvelle colonne
     phone = Column(String, nullable=True)
     raw_data = Column(Text, nullable=True)
     energy_intensity = Column(String, nullable=True)
@@ -81,7 +86,13 @@ class LeadModel(Base):
     video_url = Column(Text, nullable=True)
     status = Column(String, default="QUALIFIED")
 
+# Crée la table si elle n'existe pas
 Base.metadata.create_all(bind=engine)
+
+# 🛠️ Migration automatique : Ajoute la colonne manager_name si elle n'existe pas encore
+with engine.connect() as conn:
+    conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS manager_name VARCHAR;"))
+    conn.commit()
 
 # ==========================================
 # 4. STRUCTURES DE DONNÉES (Pydantic Models)
