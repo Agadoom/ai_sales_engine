@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from openai import OpenAI
+from datetime import datetime, timedelta
 
 # ==========================================
 # 1. AUTHENTIFICATION & SÉCURITÉ
@@ -70,8 +71,10 @@ class LeadModel(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     company_name = Column(String, nullable=False)
-    manager_name = Column(String, nullable=True)  
-    phone = Column(String, nullable=True)
+    manager_name = Column(String, nullable=True)
+    phone = Column(String, nullable=True)        # 👈 Téléphone
+    email = Column(String, nullable=True)        # 👈 E-mail du gérant
+    address = Column(String, nullable=True)      # 👈 Adresse physique
     raw_data = Column(Text, nullable=True)
     energy_intensity = Column(String, nullable=True)
     priority_score = Column(Integer, default=0)
@@ -81,13 +84,13 @@ class LeadModel(Base):
     video_url = Column(Text, nullable=True)
     status = Column(String, default="QUALIFIED")
 
-# Crée la table si elle n'existe pas
-Base.metadata.create_all(bind=engine)
-
-# 🛠️ Migration automatique : Ajoute la colonne manager_name si elle n'existe pas encore
+# Auto-migration SQL pour ajouter les colonnes manquantes sans casser la BDD
 with engine.connect() as conn:
-    conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS manager_name VARCHAR;"))
+    conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS phone VARCHAR;"))
+    conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS email VARCHAR;"))
+    conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS address VARCHAR;"))
     conn.commit()
+
 
 # Dépendance pour la session de base de données
 def get_db():
@@ -96,6 +99,73 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def is_older_than_3_years(date_string: str) -> bool:
+    """Vérifie si l'entreprise a plus de 3 ans."""
+    if not date_string:
+        return True
+    try:
+        creation_date = datetime.strptime(date_string, "%Y-%m-%d")
+        three_years_ago = datetime.now() - timedelta(days=3*365)
+        return creation_date <= three_years_ago
+    except Exception:
+        return True
+
+def fetch_company_legal_info(search_query: str, limit: int = 5):
+    """
+    Recherche Data.gouv ciblée Rhône-Alpes et filtrée sur +3 ans d'ancienneté.
+    """
+    print(f"🔍 Recherche ciblée Rhône-Alpes pour : '{search_query}'")
+    prospects = []
+    
+    # Départements Rhône-Alpes : 69, 38, 42, 01, 73, 74, 26, 07
+    rhone_alpes_deps = "69,38,42,01,73,74,26,07"
+
+    try:
+        url = (
+            f"https://recherche-entreprises.api.gouv.fr/search?"
+            f"q={requests.utils.quote(search_query)}"
+            f"&departement={rhone_alpes_deps}"
+            f"&per_page=15" # On prend une marge pour filtrer les < 3 ans
+        )
+        res = requests.get(url, timeout=5)
+        if res.status_code == 200:
+            results = res.json().get("results", [])
+            for company_data in results:
+                # 1. Filtre Ancienneté 3 ans
+                date_creation = company_data.get("date_creation")
+                if not is_older_than_3_years(date_creation):
+                    continue
+
+                company_name = company_data.get("nom_complet", search_query)
+                address = company_data.get("adresse", "Rhône-Alpes")
+                manager_name = "Gérant(e)"
+                dirigeants = company_data.get("dirigeants", [])
+
+                if dirigeants:
+                    d = dirigeants[0]
+                    prenom = d.get("prenoms", "").split(" ")[0].title()
+                    nom = d.get("nom", "").title()
+                    if prenom or nom:
+                        manager_name = f"{prenom} {nom}".strip()
+
+                prospects.append({
+                    "company_name": company_name,
+                    "manager_name": manager_name,
+                    "address": address,
+                    # Ces champs seront complétés par l'API de contact (ex: Dropcontact / Hunter)
+                    "email": None,
+                    "phone": None
+                })
+
+                if len(prospects) >= limit:
+                    break
+
+    except Exception as e:
+        print(f"⚠️ Erreur Data.gouv : {e}")
+
+    return prospects
 
 # ==========================================
 # 4. STRUCTURES DE DONNÉES (Pydantic Models)
