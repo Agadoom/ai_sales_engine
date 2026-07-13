@@ -104,6 +104,7 @@ class TriggerRequest(BaseModel):
         json_schema_extra={"example": "Équipée de 3 gros fours électriques 80kW."}
     )
 
+
 class GeneratedEmail(BaseModel):
     subject: str
     body: str
