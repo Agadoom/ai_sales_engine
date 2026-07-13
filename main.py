@@ -24,6 +24,9 @@ security = HTTPBasic()
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "DedallEnergy2026!")
 
+DROPCONTACT_API_KEY = os.getenv("DROPCONTACT_API_KEY")
+
+
 def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
     correct_username = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
     correct_password = secrets.compare_digest(credentials.password, ADMIN_PASSWORD)
@@ -233,6 +236,59 @@ def fetch_company_legal_info(search_query: str, limit: int = 5):
 
     return prospects
 
+
+def fetch_manager_email_dropcontact(manager_name: str, company_name: str) -> Optional[str]:
+    """
+    Interroge l'API Dropcontact pour retrouver l'email nominatif du gérant.
+    """
+    if not DROPCONTACT_API_KEY:
+        print("⚠️ DROPCONTACT_API_KEY non configurée.")
+        return None
+
+    headers = {
+        "X-Access-Token": DROPCONTACT_API_KEY,
+        "Content-Type": "application/json"
+    }
+
+    # Découpage rapide du prénom/nom s'il est connu
+    parts = manager_name.split(" ")
+    first_name = parts[0] if len(parts) > 0 else ""
+    last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
+
+    payload = {
+        "data": [
+            {
+                "first_name": first_name,
+                "last_name": last_name,
+                "company": company_name
+            }
+        ]
+    }
+
+    try:
+        # Envoi de la demande d'enrichissement
+        res = requests.post("https://api.dropcontact.io/batch", json=payload, headers=headers)
+        if res.status_code == 200:
+            request_id = res.json().get("request_id")
+            
+            # Dropcontact traite la demande de manière asynchrone (attente de 3-5 secondes)
+            for _ in range(5):
+                time.sleep(3)
+                poll_res = requests.get(f"https://api.dropcontact.io/batch/{request_id}", headers=headers)
+                if poll_res.status_code == 200:
+                    data = poll_res.json()
+                    if data.get("success"):
+                        results = data.get("data", [])
+                        if results and "email" in results[0]:
+                            email = results[0]["email"][0].get("email")
+                            print(f"📧 Email trouvé via Dropcontact : {email}")
+                            return email
+    except Exception as e:
+        print(f"⚠️ Erreur lors de l'appel Dropcontact : {e}")
+
+    return None
+
+
 # ==========================================
 # 6. MODULE HEYGEN (Génération Vidéo)
 # ==========================================
@@ -386,24 +442,31 @@ Ne mets JAMAIS de crochets comme [Votre Nom] ni d'autres balises génériques.
 def run_pipeline_task(query: str, raw_data: str):
     db = SessionLocal()
     try:
+        # 1. Filtre Rhône-Alpes + 3 ans d'existence
         prospects = fetch_company_legal_info(query, limit=5)
-        print(f"🎯 {len(prospects)} prospect(s) trouvé(s) pour '{query}'")
+        print(f"🎯 {len(prospects)} prospect(s) trouvé(s)")
 
         for p in prospects:
             company_name = p["company_name"]
             manager_name = p["manager_name"]
 
-            print(f"\n⚡ Traitement de : {company_name} (Dirigeant : {manager_name})")
-
+            # 2. Qualification + Email sur-mesure (OpenAI)
             qualif, email_info = qualify_and_generate(company_name, manager_name, raw_data)
 
+            # 3. Génération Vidéo HeyGen (si score >= 7)
             v_url = None
             if qualif.priority_score >= 7:
                 v_url = generate_heygen_video(company_name, manager_name)
 
+            # 4. Enrichissement Email via Dropcontact
+            manager_email = fetch_manager_email_dropcontact(manager_name, company_name)
+
+            # 5. Sauvegarde en BDD (Statut "QUALIFIED" = EN ATTENTE DE TON ACCORD)
             lead = LeadModel(
                 company_name=company_name,
                 manager_name=manager_name,
+                email=manager_email, # 👈 Stocké ici
+                address=p.get("address"),
                 raw_data=raw_data,
                 energy_intensity=qualif.energy_intensity,
                 priority_score=qualif.priority_score,
@@ -411,17 +474,18 @@ def run_pipeline_task(query: str, raw_data: str):
                 email_subject=email_info.subject,
                 email_body=email_info.body,
                 video_url=v_url,
-                status="QUALIFIED"
+                status="QUALIFIED" # 🛡️ Bloqué ici : AUCUN ENVOI AUTOMATIQUE
             )
             db.add(lead)
             db.commit()
-            print(f"💾 Prospect sauvegardé : {company_name} (Score: {qualif.priority_score})")
+            print(f"💾 Prospect prêt pour révision : {company_name} | Mail : {manager_email}")
 
     except Exception as e:
-        print(f"❌ Erreur pendant le pipeline : {e}")
+        print(f"❌ Erreur pipeline : {e}")
         db.rollback()
     finally:
         db.close()
+
 
 # ==========================================
 # 9. ENDPOINTS FASTAPI
