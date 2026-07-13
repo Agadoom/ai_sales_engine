@@ -11,7 +11,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, text
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from openai import OpenAI
 
 # ==========================================
@@ -61,8 +61,6 @@ Base = declarative_base()
 
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
 
-
-
 # ==========================================
 # 3. MODÈLE BASE DE DONNÉES (PostgreSQL)
 # ==========================================
@@ -72,7 +70,7 @@ class LeadModel(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     company_name = Column(String, nullable=False)
-    manager_name = Column(String, nullable=True) # 👈 Champ gérant
+    manager_name = Column(String, nullable=True)  
     phone = Column(String, nullable=True)
     raw_data = Column(Text, nullable=True)
     energy_intensity = Column(String, nullable=True)
@@ -83,12 +81,21 @@ class LeadModel(Base):
     video_url = Column(Text, nullable=True)
     status = Column(String, default="QUALIFIED")
 
+# Crée la table si elle n'existe pas
 Base.metadata.create_all(bind=engine)
 
-# 🛠️ Auto-migration pour créer la colonne si elle n'existe pas
+# 🛠️ Migration automatique : Ajoute la colonne manager_name si elle n'existe pas encore
 with engine.connect() as conn:
     conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS manager_name VARCHAR;"))
     conn.commit()
+
+# Dépendance pour la session de base de données
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 # ==========================================
 # 4. STRUCTURES DE DONNÉES (Pydantic Models)
@@ -103,27 +110,27 @@ class ProspectQualification(BaseModel):
     personalized_hook: str = Field(description="Accroche basée sur leur métier")
 
 class TriggerRequest(BaseModel):
-    query: Optional[str] = Field(None, json_schema_extra={"example": "Boulangerie Lyon"})
+    query: Optional[str] = Field(None, json_schema_extra={"example": "Boulangerie Paris"})
     company_name: Optional[str] = None
     raw_data: Optional[str] = "Recherche via interface"
 
     @property
     def target_name(self) -> str:
-        return self.query or self.company_name or "Boulangerie Rhône Alpes"
+        return self.query or self.company_name or "Entreprise Inconnue"
 
 class GeneratedEmail(BaseModel):
     subject: str
     body: str
 
 # ==========================================
-# 5. MODULE D'ENRICHISSEMENT (Data.gouv)
+# 5. MODULE D'ENRICHISSEMENT (APIs EXTERNES)
 # ==========================================
 
 def fetch_company_legal_info(search_query: str, limit: int = 5):
     """
-    Recherche jusqu'à `limit` entreprises avec le nom de leur gérant.
+    Interroge l'API Data.gouv et retourne une liste de prospects (jusqu'à `limit`).
     """
-    print(f"🔍 Recherche Data.gouv pour : '{search_query}' (max {limit})")
+    print(f"🔍 Recherche multi-prospects pour : '{search_query}' (max {limit})")
     prospects = []
 
     try:
@@ -135,7 +142,7 @@ def fetch_company_legal_info(search_query: str, limit: int = 5):
                 company_name = company_data.get("nom_complet", search_query)
                 manager_name = "Gérant(e)"
                 dirigeants = company_data.get("dirigeants", [])
-                
+
                 if dirigeants:
                     d = dirigeants[0]
                     prenom = d.get("prenoms", "").split(" ")[0].title()
@@ -148,57 +155,109 @@ def fetch_company_legal_info(search_query: str, limit: int = 5):
                     "manager_name": manager_name
                 })
     except Exception as e:
-        print(f"⚠️ Erreur Data.gouv : {e}")
+        print(f"⚠️ Erreur lors de la recherche Data.gouv : {e}")
 
+    # Fallback si rien n'est trouvé
     if not prospects:
         prospects.append({"company_name": search_query, "manager_name": "Gérant(e)"})
 
     return prospects
 
 # ==========================================
-# 6. PIPELINE MULTI-PROSPECTS (Background Task)
+# 6. MODULE HEYGEN (Génération Vidéo)
 # ==========================================
 
-def run_pipeline_task(query: str, raw_data: str):
-    db = SessionLocal()
+def get_french_voice_id(headers: dict) -> Optional[str]:
     try:
-        # Récupère 5 boulangeries/entreprises
-        prospects = fetch_company_legal_info(query, limit=5)
-        print(f"🎯 {len(prospects)} prospect(s) trouvé(s)")
-
-        for p in prospects:
-            company_name = p["company_name"]
-            manager_name = p["manager_name"]
-
-            # Qualification + Email OpenAI
-            qualif, email_info = qualify_and_generate(company_name, manager_name, raw_data)
-
-            # Vidéo HeyGen si Score >= 7
-            v_url = None
-            if qualif.priority_score >= 7:
-                v_url = generate_heygen_video(company_name, manager_name)
-
-            lead = LeadModel(
-                company_name=company_name,
-                manager_name=manager_name,
-                raw_data=raw_data,
-                energy_intensity=qualif.energy_intensity,
-                priority_score=qualif.priority_score,
-                personalized_hook=qualif.personalized_hook,
-                email_subject=email_info.subject,
-                email_body=email_info.body,
-                video_url=v_url,
-                status="QUALIFIED"
-            )
-            db.add(lead)
-            db.commit()
-            print(f"💾 Sauvegardé : {company_name} | Gérant : {manager_name}")
-
+        res = requests.get("https://api.heygen.com/v2/voices", headers=headers)
+        if res.status_code == 200:
+            voices = res.json().get("data", {}).get("voices", [])
+            for v in voices:
+                language = str(v.get("language", "")).lower()
+                if "french" in language or "fr" in language:
+                    return v.get("voice_id")
+            if voices:
+                return voices[0].get("voice_id")
     except Exception as e:
-        print(f"❌ Erreur pipeline : {e}")
-        db.rollback()
-    finally:
-        db.close()
+        print(f"⚠️ Erreur Voix HeyGen : {e}")
+    return None
+
+def get_avatar_id(headers: dict) -> Optional[str]:
+    try:
+        res = requests.get("https://api.heygen.com/v2/avatars", headers=headers)
+        if res.status_code == 200:
+            avatars = res.json().get("data", {}).get("avatars", [])
+            if avatars:
+                for av in avatars:
+                    looks = av.get("looks", [])
+                    if looks:
+                        return looks[0].get('look_id')
+                for av in avatars:
+                    if "expressive" not in av.get("avatar_id", ""):
+                        return av.get("avatar_id")
+                return avatars[0].get("avatar_id")
+    except Exception as e:
+        print(f"⚠️ Erreur Avatar HeyGen : {e}")
+    return None
+
+def generate_heygen_video(company_name: str, manager_name: str) -> Optional[str]:
+    if not HEYGEN_API_KEY:
+        return None
+
+    headers = {
+        "X-Api-Key": HEYGEN_API_KEY,
+        "Content-Type": "application/json"
+    }
+
+    voice_id = get_french_voice_id(headers)
+    avatar_id = get_avatar_id(headers)
+
+    if not voice_id or not avatar_id:
+        return None
+
+    salutation = f"Bonjour {manager_name}" if manager_name != "Gérant(e)" else f"Bonjour à l'équipe de {company_name}"
+
+    script_text = (
+        f"{salutation}. "
+        f"En analysant les équipements de {company_name}, j'ai remarqué une opportunité majeure "
+        f"pour réduire vos factures d'électricité ce mois-ci. "
+        f"Regardons ensemble comment Dedall Energy peut vous accompagner."
+    )
+
+    payload = {
+        "video_inputs": [
+            {
+                "character": {"type": "avatar", "avatar_id": avatar_id, "avatar_style": "normal"},
+                "voice": {"type": "text", "input_text": script_text, "voice_id": voice_id},
+                "background": {"type": "color", "value": "#FAFAFA"}
+            }
+        ],
+        "dimension": {"width": 1280, "height": 720}
+    }
+
+    try:
+        res = requests.post("https://api.heygen.com/v2/video/generate", json=payload, headers=headers)
+        if res.status_code != 200:
+            return None
+
+        video_id = res.json().get("data", {}).get("video_id")
+        if not video_id:
+            return None
+
+        status_url = f"https://api.heygen.com/v1/video_status.get?video_id={video_id}"
+        for _ in range(30):
+            time.sleep(10)
+            status_res = requests.get(status_url, headers=headers).json()
+            status = status_res.get("data", {}).get("status")
+
+            if status == "completed":
+                return status_res["data"]["video_url"]
+            elif status == "failed":
+                return None
+        return None
+    except Exception as e:
+        print(f"❌ Exception HeyGen : {e}")
+        return None
 
 # ==========================================
 # 7. MODULE DE QUALIFICATION ET EMAIL (IA)
@@ -241,7 +300,7 @@ Ne mets JAMAIS de crochets comme [Votre Nom] ni d'autres balises génériques.
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": system_email},
-            {"role": "user", "content": user_email}
+            {"role": "user", "email"}
         ],
         response_format=GeneratedEmail
     )
@@ -256,26 +315,21 @@ Ne mets JAMAIS de crochets comme [Votre Nom] ni d'autres balises génériques.
 def run_pipeline_task(query: str, raw_data: str):
     db = SessionLocal()
     try:
-        # ÉTAPE 1 : Récupérer jusqu'à 5 entreprises correspondant à la recherche
         prospects = fetch_company_legal_info(query, limit=5)
         print(f"🎯 {len(prospects)} prospect(s) trouvé(s) pour '{query}'")
 
-        # ÉTAPE 2 : Traiter chaque prospect un par un
         for p in prospects:
             company_name = p["company_name"]
             manager_name = p["manager_name"]
 
             print(f"\n⚡ Traitement de : {company_name} (Dirigeant : {manager_name})")
 
-            # Qualification + Email
             qualif, email_info = qualify_and_generate(company_name, manager_name, raw_data)
 
-            # Vidéo (si score >= 7)
             v_url = None
             if qualif.priority_score >= 7:
                 v_url = generate_heygen_video(company_name, manager_name)
 
-            # Sauvegarde BDD
             lead = LeadModel(
                 company_name=company_name,
                 manager_name=manager_name,
@@ -298,7 +352,6 @@ def run_pipeline_task(query: str, raw_data: str):
     finally:
         db.close()
 
-
 # ==========================================
 # 9. ENDPOINTS FASTAPI
 # ==========================================
@@ -308,9 +361,9 @@ app = FastAPI(
     version="2.0.0"
 )
 
+# 🔓 PROTECTION DESACTIVÉE ICI POUR LE TEST PILOTE
 @app.get("/")
-def home(request: Request, username: str = Depends(get_current_user)):
-    db = SessionLocal()
+def home(request: Request, db: Session = Depends(get_db)):
     try:
         leads = db.query(LeadModel).order_by(LeadModel.id.desc()).all()
         return templates.TemplateResponse(
@@ -318,8 +371,8 @@ def home(request: Request, username: str = Depends(get_current_user)):
             name="dashboard.html", 
             context={"leads": leads}
         )
-    finally:
-        db.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/trigger-pipeline")
