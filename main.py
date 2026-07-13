@@ -131,28 +131,80 @@ def get_avatar_id(headers: dict) -> Optional[str]:
 
 def generate_heygen_video(company_name: str) -> Optional[str]:
     """
-    Génère une vidéo personnalisée via HeyGen V2 et retourne l'URL vidéo finale.
+    Génère une vidéo personnalisée via l'API HeyGen (Fallback V1 ultra-stable) 
+    pour contourner les conflits de looks/avatars complexes en V2.
     """
     if not HEYGEN_API_KEY:
         print("⚠️ HEYGEN_API_KEY non fournie, étape vidéo ignorée.")
         return None
 
+    # Utilisation des headers V1/V2 standards
     headers = {
         "X-Api-Key": HEYGEN_API_KEY,
         "Content-Type": "application/json"
     }
 
-    # 1. Récupération dynamique de la voix
-    voice_id = get_french_voice_id(headers)
-    if not voice_id:
-        print("❌ Impossible de trouver un voice_id valide sur le compte HeyGen.")
+    script_text = (
+        f"Bonjour, je m'adresse à l'équipe de {company_name}. "
+        f"En analysant vos équipements, j'ai remarqué une opportunité majeure "
+        f"pour réduire vos factures d'électricité ce mois-ci. "
+        f"Regardons ensemble comment Dedall Energy peut vous accompagner."
+    )
+
+    # Payload V1 : beaucoup plus simple et tolérant avec les voix et avatars par défaut
+    payload = {
+        "background": "#FAFAFA",
+        "clips": [
+            {
+                "avatar_id": "Abigail_standing_office_front", # L'avatar standard détecté sur ton compte
+                "avatar_style": "normal",
+                "input_text": script_text,
+                "voice_id": "67375f26ab6e44ce8569cea3840ef594" # L'ID de Gaëlle trouvé sur ton compte
+            }
+        ],
+        "ratio": "16:9"
+    }
+
+    try:
+        # Appel sur le endpoint V1 pour forcer le rendu sans erreur de structure V2
+        res = requests.post("https://api.heygen.com/v1/video.generate", json=payload, headers=headers)
+
+        if res.status_code != 200:
+            print(f"❌ Erreur HTTP HeyGen ({res.status_code}) : {res.text}")
+            return None
+
+        res_data = res.json()
+        video_id = res_data.get("data", {}).get("video_id")
+
+        if not video_id:
+            print(f"❌ Réponse HeyGen sans video_id : {res_data}")
+            return None
+
+        print(f"🎬 Vidéo HeyGen lancée avec succès (ID: {video_id}). En attente du rendu...")
+
+        status_url = f"https://api.heygen.com/v1/video_status.get?video_id={video_id}"
+        for _ in range(30): # Un peu plus de marge pour le rendu
+            time.sleep(10)
+            status_res = requests.get(status_url, headers=headers).json()
+            status = status_res.get("data", {}).get("status")
+
+            if status == "completed":
+                video_url = status_res["data"]["video_url"]
+                print(f"✅ Vidéo HeyGen prête : {video_url}")
+                return video_url
+            elif status == "failed":
+                print(f"❌ Échec du rendu de la vidéo HeyGen (Statut: failed).")
+                # Affichons la raison de l'échec si disponible
+                print(f"Détails de l'erreur : {status_res.get('data', {})}")
+                return None
+
+        print("⏰ Timeout HeyGen atteint.")
         return None
 
-    # 2. Récupération dynamique de l'avatar présent sur ton compte
-    avatar_id = get_avatar_id(headers)
-    if not avatar_id:
-        print("❌ Aucun avatar trouvé sur ton compte HeyGen. Créez-en un ou ajoutez un avatar public à votre espace.")
+    except Exception as e:
+        print(f"❌ Exception HeyGen détaillée : {e}")
         return None
+
 
     script_text = (
         f"Bonjour, je m'adresse à l'équipe de {company_name}. "
