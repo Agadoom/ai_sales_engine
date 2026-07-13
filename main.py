@@ -107,7 +107,9 @@ class ProspectQualification(BaseModel):
     personalized_hook: str = Field(description="Accroche basée sur leur métier")
 
 class TriggerRequest(BaseModel):
-    query: str = Field(..., json_schema_extra={"example": "Boulangerie Paris"})
+    company_name: str = Field(..., json_schema_extra={"example": "Boulangerie Dupont"})
+    raw_data: str = Field(..., json_schema_extra={"example": "Équipée de 3 gros fours électriques 80kW."})
+
 
 class GeneratedEmail(BaseModel):
     subject: str
@@ -288,7 +290,7 @@ Rédige un email court (3-4 phrases), personnalisé et impactant.
 RÈGLE IMPÉRATIVE DE SIGNATURE :
 Termine TOUJOURS l'email exactement par cette signature :
 Cordialement,
-Billel de Dedall Energy
+Benoît de Dedall Energy
 
 Ne mets JAMAIS de crochets comme [Votre Nom] ni d'autres balises génériques.
 """
@@ -310,44 +312,37 @@ Ne mets JAMAIS de crochets comme [Votre Nom] ni d'autres balises génériques.
 # 6. PIPELINE PRINCIPAL (Background Task)
 # ==========================================
 
-def run_pipeline_task(query: str):
+def run_pipeline_task(company_name: str, raw_data: str):
     db = SessionLocal()
     try:
-        mock_leads = [
-            {"company_name": f"{query} - Artisan 1", "raw_data": "Boulangerie équipée de 3 gros fours électriques 80kW."},
-            {"company_name": f"{query} - Artisan 2", "raw_data": "Commerce de quartier, petit terminal de cuisson."}
-        ]
+        # On utilise directement les vraies données reçues sans faire de boucle de mocks !
+        qualif, email_info = qualify_and_generate(company_name, raw_data)
 
-        for item in mock_leads:
-            company = item["company_name"]
-            raw_info = item["raw_data"]
+        v_url = None
+        if qualif.priority_score >= 7:
+            v_url = generate_heygen_video(company_name)
 
-            qualif, email_info = qualify_and_generate(company, raw_info)
-
-            v_url = None
-            if qualif.priority_score >= 7:
-                v_url = generate_heygen_video(company)
-
-            lead = LeadModel(
-                company_name=company,
-                raw_data=raw_info,
-                energy_intensity=qualif.energy_intensity,
-                priority_score=qualif.priority_score,
-                personalized_hook=qualif.personalized_hook,
-                email_subject=email_info.subject,
-                email_body=email_info.body,
-                video_url=v_url,
-                status="QUALIFIED"
-            )
-            db.add(lead)
-            db.commit()
-            print(f"💾 Prospect sauvegardé en BDD : {company} (Score: {qualif.priority_score})")
+        lead = LeadModel(
+            company_name=company_name,
+            raw_data=raw_data,
+            energy_intensity=qualif.energy_intensity,
+            priority_score=qualif.priority_score,
+            personalized_hook=qualif.personalized_hook,
+            email_subject=email_info.subject,
+            email_body=email_info.body,
+            video_url=v_url,
+            status="QUALIFIED"
+        )
+        db.add(lead)
+        db.commit()
+        print(f"💾 Prospect sauvegardé en BDD : {company_name} (Score: {qualif.priority_score})")
 
     except Exception as e:
         print(f"❌ Erreur pendant le pipeline : {e}")
         db.rollback()
     finally:
         db.close()
+
 
 # ==========================================
 # 7. ENDPOINTS FASTAPI (App & Router Configuration)
@@ -377,8 +372,10 @@ def home(request: Request, username: str = Depends(get_current_user)):
 
 @app.post("/trigger-pipeline")
 def trigger_pipeline(payload: TriggerRequest, background_tasks: BackgroundTasks):
-    background_tasks.add_task(run_pipeline_task, payload.query)
-    return {"message": f"Pipeline lancé en tâche de fond pour : '{payload.query}'"}
+    # On passe les deux arguments distincts à la fonction en tâche de fond
+    background_tasks.add_task(run_pipeline_task, payload.company_name, payload.raw_data)
+    return {"message": f"Pipeline lancé en tâche de fond pour l'entreprise : '{payload.company_name}'"}
+
 
 @app.post("/send-pending-leads")
 def send_pending_leads(min_score: int = Query(7, ge=1, le=10)):
