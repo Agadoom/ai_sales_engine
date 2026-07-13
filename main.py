@@ -98,11 +98,15 @@ class ProspectQualification(BaseModel):
     personalized_hook: str = Field(description="Accroche basée sur leur métier")
 
 class TriggerRequest(BaseModel):
-    company_name: str = Field(..., json_schema_extra={"example": "Boulangerie Dupont"})
-    raw_data: Optional[str] = Field(
-        default="Informations non renseignées", 
-        json_schema_extra={"example": "Équipée de 3 gros fours électriques 80kW."}
-    )
+    company_name: Optional[str] = None
+    query: Optional[str] = None
+    raw_data: Optional[str] = "Informations non renseignées"
+
+    # Propriété pour récupérer automatiquement le nom, peu importe la clé envoyée
+    @property
+    def name(self) -> str:
+        return self.company_name or self.query or "Entreprise Inconnue"
+
 
 
 class GeneratedEmail(BaseModel):
