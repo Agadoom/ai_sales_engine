@@ -24,7 +24,7 @@ security = HTTPBasic()
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "DedallEnergy2026!")
 
-DROPCONTACT_API_KEY = os.getenv("DROPCONTACT_API_KEY")
+HUNTER_API_KEY = os.getenv("HUNTER_API_KEY")
 
 
 def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
