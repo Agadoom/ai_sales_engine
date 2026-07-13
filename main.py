@@ -289,6 +289,7 @@ def fetch_manager_email_dropcontact(manager_name: str, company_name: str) -> Opt
     return None
 
 
+
 # ==========================================
 # 6. MODULE HEYGEN (Génération Vidéo)
 # ==========================================
