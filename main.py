@@ -126,11 +126,22 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 1440
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=False)
 
+# ==========================================
+# FONCTIONS DE HACHAGE DES MOTS DE PASSE (BCRYPT DIRECT)
+# ==========================================
+
+
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+  # Troncature de sécurité à 72 octets pour bcrypt
+  pwd_bytes = password.encode('utf-8')[:72]
+  salt = bcrypt.gensalt()
+  return bcrypt.hashpw(pwd_bytes, salt).decode('utf-8')
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+  pwd_bytes = plain_password.encode('utf-8')[:72]
+  return bcrypt.checkpw(pwd_bytes, hashed_password.encode('utf-8'))
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
