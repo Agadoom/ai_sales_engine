@@ -68,11 +68,22 @@ client_openai = OpenAI(api_key=OPENAI_API_KEY)
 # 3. MODÈLE BASE DE DONNÉES (PostgreSQL)
 # ==========================================
 
+__tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    is_active = Column(Boolean, default=True)
+    subscription_status = Column(String, default="trial")  # trial, active, canceled
+    stripe_customer_id = Column(String, nullable=True)
+
 class LeadModel(Base):
     __tablename__ = "leads"
-
+    
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))  # <--- LE LIEN ICI
     company_name = Column(String, nullable=False)
+  , nullable=False)
     manager_name = Column(String, nullable=True)
     phone = Column(String, nullable=True)
     email = Column(String, nullable=True)
