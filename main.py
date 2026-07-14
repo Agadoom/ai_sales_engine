@@ -17,7 +17,12 @@ from openai import OpenAI
 from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from database import Base  # Ou l'import correspondant à ton fichier database.py
-
+import jwt
+from datetime import datetime, timedelta
+from fastapi import Depends, HTTPException, status, Form
+from fastapi.security import OAuth2PasswordBearer
+from passlib.context import CryptContext
+from sqlalchemy.orm import Session
 
 # ==========================================
 # 1. AUTHENTIFICATION & SÉCURITÉ
@@ -40,6 +45,109 @@ def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
             headers={"WWW-Authenticate": "Basic"},
         )
     return credentials.username
+
+
+# ==========================================
+# CONFIGURATION SÉCURITÉ & TOKENS
+# ==========================================
+SECRET_KEY = "CHANGE_MOI_AVEC_UNE_CLÉ_TRÈS_SECRÈTE"  # Garde cette clé secrète !
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # Le jeton expire après 24 heures
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=False)
+
+# Fonctions utilitaires pour les mots de passe
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+# Fonction utilitaire pour générer le JWT Token
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+# Fonction pour récupérer l'utilisateur connecté via son Cookie ou Token
+def get_current_user(request: Request, db: Session = Depends(get_db)):
+    # On récupère le token stocké dans les cookies du navigateur
+    token = request.cookies.get("access_token")
+    if not token:
+        return None
+    
+    # Si le token commence par "Bearer ", on le nettoie
+    if token.startswith("Bearer "):
+        token = token.split(" ")[1]
+        
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            return None
+    except jwt.PyJWTError:
+        return None
+        
+    user = db.query(UserModel).filter(UserModel.email == email).first()
+    return user
+
+
+# ==========================================
+# ENDPOINTS D'AUTHENTIFICATION (ROUTES)
+# ==========================================
+
+# 1. Inscription (Sign-Up)
+@app.post("/register")
+def register(email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
+    # Vérifier si l'utilisateur existe déjà
+    db_user = db.query(UserModel).filter(UserModel.email == email).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Cet e-mail est déjà enregistré.")
+    
+    # Hacher le mot de passe et sauvegarder l'utilisateur
+    hashed_pwd = get_password_hash(password)
+    new_user = UserModel(email=email, hashed_password=hashed_pwd)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    return {"message": "Utilisateur créé avec succès ! Tu peux maintenant te connecter."}
+
+
+# 2. Connexion (Login)
+from fastapi.responses import RedirectResponse
+
+@app.post("/login")
+def login(response: Response, email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
+    # Vérifier l'existence de l'utilisateur
+    user = db.query(UserModel).filter(UserModel.email == email).first()
+    if not user or not verify_password(password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="E-mail ou mot de passe incorrect.")
+    
+    # Créer le jeton d'accès
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
+    
+    # On stocke le token dans un Cookie sécurisé HTTP-only
+    redirect = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+    redirect.set_cookie(key="access_token", value=f"Bearer {access_token}", httponly=True)
+    return redirect
+
+
+# 3. Déconnexion (Logout)
+@app.get("/logout")
+def logout():
+    response = RedirectResponse(url="/login-page", status_code=status.HTTP_303_SEE_OTHER)
+    response.delete_cookie("access_token")
+    return response
+
+
 
 # ==========================================
 # 2. CONFIGURATION ET TEMPLATES JINJA2
@@ -493,22 +601,24 @@ app = FastAPI(
 )
 
 @app.get("/")
-def home(request: Request, db: Session = Depends(get_db)):
+def home(request: Request, current_user: UserModel = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Si l'utilisateur n'est pas connecté, on le redirige vers la page de login
+    if not current_user:
+        return RedirectResponse(url="/login-page", status_code=status.HTTP_303_SEE_OTHER)
+    
     try:
-        # 1. On récupère les leads depuis la BDD
-        raw_leads = db.query(LeadModel).order_by(LeadModel.id.desc()).all()
-        
-        # 2. On les convertit tous en dictionnaires sérialisables en JSON
+        # On ne récupère que les leads appartenant à l'utilisateur connecté !
+        raw_leads = db.query(LeadModel).filter(LeadModel.user_id == current_user.id).order_by(LeadModel.id.desc()).all()
         leads_dict = [lead.to_dict() for lead in raw_leads]
         
-        # 3. On envoie la liste nettoyée au template
         return templates.TemplateResponse(
             request=request, 
             name="dashboard.html", 
-            context={"leads": leads_dict}
+            context={"leads": leads_dict, "user": current_user}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.post("/trigger-pipeline")
