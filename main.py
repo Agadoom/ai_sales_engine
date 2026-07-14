@@ -16,7 +16,9 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, Da
 from sqlalchemy.orm import declarative_base, sessionmaker, Session, relationship
 from openai import OpenAI
 import jwt
-from passlib.context import CryptContext
+# Supprime ou commente : from passlib.context import CryptContext
+import bcrypt
+
 
 # ==========================================
 # 1. INITIALISATION DE FASTAPI & ENV
