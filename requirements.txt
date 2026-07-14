@@ -11,6 +11,7 @@ pandas
 jinja2
 PyJWT
 passlib[bcrypt]
+bcrypt
 
 
 
