@@ -1,157 +1,30 @@
 import os
 import time
 import json
-import secrets
 import requests
 import uvicorn
+import jwt
 from datetime import datetime, timedelta
 from typing import List, Optional, Literal
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Query, Request, Depends
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Query, Request, Depends, status, Form, Response
+from fastapi.responses import RedirectResponse
+from fastapi.security import OAuth2PasswordBearer
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
-from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, text
-from sqlalchemy.orm import declarative_base, sessionmaker, Session
-from openai import OpenAI
-from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey
-from sqlalchemy.orm import relationship
-from database import Base  # Ou l'import correspondant à ton fichier database.py
-import jwt
-from datetime import datetime, timedelta
-from fastapi import Depends, HTTPException, status, Form
-from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
-from sqlalchemy.orm import Session
+
+from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, text, ForeignKey
+from sqlalchemy.orm import declarative_base, sessionmaker, Session, relationship
 
 # ==========================================
-# 1. AUTHENTIFICATION & SÉCURITÉ
+# 1. INITIALISATION DE FASTAPI & JINJA2
 # ==========================================
 
-security = HTTPBasic()
-
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "DedallEnergy2026!")
-
-HUNTER_API_KEY = os.getenv("HUNTER_API_KEY")
-
-def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
-    correct_username = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
-    correct_password = secrets.compare_digest(credentials.password, ADMIN_PASSWORD)
-    if not (correct_username and correct_password):
-        raise HTTPException(
-            status_code=401,
-            detail="Identifiants incorrects",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    return credentials.username
-
-
-# ==========================================
-# CONFIGURATION SÉCURITÉ & TOKENS
-# ==========================================
-SECRET_KEY = "CHANGE_MOI_AVEC_UNE_CLÉ_TRÈS_SECRÈTE"  # Garde cette clé secrète !
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # Le jeton expire après 24 heures
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=False)
-
-# Fonctions utilitaires pour les mots de passe
-def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
-
-# Fonction utilitaire pour générer le JWT Token
-def create_access_token(data: dict, expires_delta: timedelta = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
-
-# Fonction pour récupérer l'utilisateur connecté via son Cookie ou Token
-def get_current_user(request: Request, db: Session = Depends(get_db)):
-    # On récupère le token stocké dans les cookies du navigateur
-    token = request.cookies.get("access_token")
-    if not token:
-        return None
-    
-    # Si le token commence par "Bearer ", on le nettoie
-    if token.startswith("Bearer "):
-        token = token.split(" ")[1]
-        
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            return None
-    except jwt.PyJWTError:
-        return None
-        
-    user = db.query(UserModel).filter(UserModel.email == email).first()
-    return user
-
-
-# ==========================================
-# ENDPOINTS D'AUTHENTIFICATION (ROUTES)
-# ==========================================
-
-# 1. Inscription (Sign-Up)
-@app.post("/register")
-def register(email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
-    # Vérifier si l'utilisateur existe déjà
-    db_user = db.query(UserModel).filter(UserModel.email == email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Cet e-mail est déjà enregistré.")
-    
-    # Hacher le mot de passe et sauvegarder l'utilisateur
-    hashed_pwd = get_password_hash(password)
-    new_user = UserModel(email=email, hashed_password=hashed_pwd)
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    
-    return {"message": "Utilisateur créé avec succès ! Tu peux maintenant te connecter."}
-
-
-# 2. Connexion (Login)
-from fastapi.responses import RedirectResponse
-
-@app.post("/login")
-def login(response: Response, email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
-    # Vérifier l'existence de l'utilisateur
-    user = db.query(UserModel).filter(UserModel.email == email).first()
-    if not user or not verify_password(password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="E-mail ou mot de passe incorrect.")
-    
-    # Créer le jeton d'accès
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
-    
-    # On stocke le token dans un Cookie sécurisé HTTP-only
-    redirect = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
-    redirect.set_cookie(key="access_token", value=f"Bearer {access_token}", httponly=True)
-    return redirect
-
-
-# 3. Déconnexion (Logout)
-@app.get("/logout")
-def logout():
-    response = RedirectResponse(url="/login-page", status_code=status.HTTP_303_SEE_OTHER)
-    response.delete_cookie("access_token")
-    return response
-
-
-
-# ==========================================
-# 2. CONFIGURATION ET TEMPLATES JINJA2
-# ==========================================
+app = FastAPI(
+    title="Dedall Energy - Automated Outreach Engine",
+    version="2.0.0"
+)
 
 templates = Jinja2Templates(directory="templates")
 
@@ -162,9 +35,14 @@ def escapejs_filter(val):
 
 templates.env.filters["escapejs"] = escapejs_filter
 
+# ==========================================
+# 2. CONFIGURATION BASE DE DONNÉES & API KEYS
+# ==========================================
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 HEYGEN_API_KEY = os.getenv("HEYGEN_API_KEY")
+HUNTER_API_KEY = os.getenv("HUNTER_API_KEY")
 OUTREACH_WEBHOOK_URL = os.getenv("OUTREACH_WEBHOOK_URL")
 
 if not DATABASE_URL:
@@ -174,13 +52,19 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-client_openai = OpenAI(api_key=OPENAI_API_KEY)
+client_openai = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 # ==========================================
-# 3. MODÈLE BASE DE DONNÉES (PostgreSQL)
+# 3. MODÈLES BASE DE DONNÉES (SQLAlchemy)
 # ==========================================
 
-# 1. LA TABLE UTILISATEUR (SaaS)
 class UserModel(Base):
     __tablename__ = "users"
 
@@ -188,27 +72,21 @@ class UserModel(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     
-    # Gestion de l'abonnement
     is_active = Column(Boolean, default=True)
     subscription_status = Column(String, default="trial")  # trial, active, canceled
     stripe_customer_id = Column(String, nullable=True)
     
-    # Clés API personnelles de l'utilisateur (optionnel, s'il utilise ses propres comptes)
     openai_api_key = Column(String, nullable=True)
     hunter_api_key = Column(String, nullable=True)
     heygen_api_key = Column(String, nullable=True)
 
-    # Relation : Un utilisateur a plusieurs leads
     leads = relationship("LeadModel", back_populates="owner", cascade="all, delete-orphan")
 
 
-# 2. LA TABLE LEADS (Mise à jour avec liaison utilisateur)
 class LeadModel(Base):
     __tablename__ = "leads"
 
     id = Column(Integer, primary_key=True, index=True)
-    
-    # 🔑 LA CLÉ ÉTRANGÈRE : Lie le lead à un utilisateur précis
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     
     company_name = Column(String, nullable=False)
@@ -225,7 +103,6 @@ class LeadModel(Base):
     video_url = Column(Text, nullable=True)
     status = Column(String, default="QUALIFIED")
 
-    # Relation inverse : Le lead appartient à un utilisateur
     owner = relationship("UserModel", back_populates="leads")
 
     def to_dict(self):
@@ -234,7 +111,7 @@ class LeadModel(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# Auto-migrations SQL
+# Auto-migrations
 with engine.connect() as conn:
     conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS manager_name VARCHAR;"))
     conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS phone VARCHAR;"))
@@ -242,15 +119,48 @@ with engine.connect() as conn:
     conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS address VARCHAR;"))
     conn.commit()
 
-def get_db():
-    db = SessionLocal()
+# ==========================================
+# 4. SÉCURITÉ & AUTHENTIFICATION (JWT)
+# ==========================================
+
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "SECRET_KEY_DEDALL_2026_CHANGE_ME")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 1440
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=False)
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def get_current_user(request: Request, db: Session = Depends(get_db)):
+    token = request.cookies.get("access_token")
+    if not token:
+        return None
+    if token.startswith("Bearer "):
+        token = token.split(" ")[1]
+        
     try:
-        yield db
-    finally:
-        db.close()
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            return None
+    except jwt.PyJWTError:
+        return None
+        
+    return db.query(UserModel).filter(UserModel.email == email).first()
 
 # ==========================================
-# 4. STRUCTURES DE DONNÉES (Pydantic Models)
+# 5. STRUCTURES DE DONNÉES (Pydantic Models)
 # ==========================================
 
 class ProspectQualification(BaseModel):
@@ -275,11 +185,10 @@ class GeneratedEmail(BaseModel):
     body: str
 
 # ==========================================
-# 5. MODULE D'ENRICHISSEMENT & FILTRES
+# 6. MODULE D'ENRICHISSEMENT & FILTRES
 # ==========================================
 
 def is_older_than_3_years(date_string: Optional[str]) -> bool:
-    """Vérifie si l'entreprise a plus de 3 ans d'ancienneté."""
     if not date_string:
         return True
     try:
@@ -290,9 +199,7 @@ def is_older_than_3_years(date_string: Optional[str]) -> bool:
         return True
 
 def fetch_manager_email_hunter(manager_name: str, company_name: str) -> Optional[str]:
-    """Recherche l'e-mail du gérant via Hunter.io."""
     if not HUNTER_API_KEY:
-        print("⚠️ HUNTER_API_KEY non configurée.")
         return None
 
     parts = manager_name.split(" ")
@@ -310,23 +217,14 @@ def fetch_manager_email_hunter(manager_name: str, company_name: str) -> Optional
         res = requests.get(url, timeout=5)
         if res.status_code == 200:
             data = res.json().get("data", {})
-            email = data.get("email")
-            if email:
-                print(f"📧 Email trouvé via Hunter.io : {email}")
-                return email
+            return data.get("email")
     except Exception as e:
         print(f"⚠️ Erreur Hunter.io : {e}")
 
     return None
 
 def fetch_company_legal_info(search_query: str, limit: int = 5):
-    """
-    Recherche Data.gouv ciblée Rhône-Alpes + Filtre +3 ans d'ancienneté.
-    """
-    print(f"🔍 Recherche ciblée Rhône-Alpes (+3 ans) pour : '{search_query}'")
     prospects = []
-    
-    # Départements Rhône-Alpes : 69, 38, 42, 01, 73, 74, 26, 07
     rhone_alpes_deps = "69,38,42,01,73,74,26,07"
 
     try:
@@ -340,7 +238,6 @@ def fetch_company_legal_info(search_query: str, limit: int = 5):
         if res.status_code == 200:
             results = res.json().get("results", [])
             for company_data in results:
-                # Filtre : +3 ans d'ancienneté
                 date_creation = company_data.get("date_creation")
                 if not is_older_than_3_years(date_creation):
                     continue
@@ -357,7 +254,6 @@ def fetch_company_legal_info(search_query: str, limit: int = 5):
                     if prenom or nom:
                         manager_name = f"{prenom} {nom}".strip()
 
-                # Recherche E-mail via Hunter.io
                 email = fetch_manager_email_hunter(manager_name, company_name)
 
                 prospects.append({
@@ -370,7 +266,6 @@ def fetch_company_legal_info(search_query: str, limit: int = 5):
 
                 if len(prospects) >= limit:
                     break
-
     except Exception as e:
         print(f"⚠️ Erreur Data.gouv : {e}")
 
@@ -386,7 +281,7 @@ def fetch_company_legal_info(search_query: str, limit: int = 5):
     return prospects
 
 # ==========================================
-# 6. MODULE HEYGEN (Génération Vidéo)
+# 7. MODULE HEYGEN (Génération Vidéo)
 # ==========================================
 
 def get_french_voice_id(headers: dict) -> Optional[str]:
@@ -482,11 +377,10 @@ def generate_heygen_video(company_name: str, manager_name: str) -> Optional[str]
         return None
 
 # ==========================================
-# 7. MODULE DE QUALIFICATION ET EMAIL (IA)
+# 8. QUALIFICATION & EMAIL (IA)
 # ==========================================
 
 def qualify_and_generate(company_name: str, manager_name: str, raw_data: str):
-    # 1. Étape de qualification inchangée
     system_qualif = (
         "Tu es un expert en qualification B2B pour courtier en énergie. "
         "Évalue le potentiel d'économie d'énergie de l'entreprise."
@@ -503,7 +397,6 @@ def qualify_and_generate(company_name: str, manager_name: str, raw_data: str):
     )
     qualification = res_qualif.choices[0].message.parsed
 
-    # 2. Étape Email : On force une structure HTML ultra-pro et moderne
     salutation_instruction = f"Adresse-toi directement à {manager_name}." if manager_name != "Gérant(e)" else "Adresse-toi au gérant de manière professionnelle."
 
     system_email = f"""
@@ -522,7 +415,7 @@ Termine TOUJOURS l'email exactement par cette signature en HTML propre :
 <p style="font-weight: bold; color: #1e3a8a; margin: 0;">Benoît</p>
 <p style="font-size: 12px; color: #666666; margin: 0;">Expert Solutions Énergie — Dedall Energy</p>
 
-Ne mets JAMAIS de texte brut de type "--- sent with...", pas de crochets, pas de balises markdown (comme ```html), renvoie directement le code HTML propre.
+Ne mets JAMAIS de texte brut de type "--- sent with...", pas de crochets, pas de balises markdown, renvoie directement le code HTML propre.
 """
     user_email = f"Entreprise : {company_name}\nAccroche : {qualification.personalized_hook}"
 
@@ -538,35 +431,28 @@ Ne mets JAMAIS de texte brut de type "--- sent with...", pas de crochets, pas de
 
     return qualification, email_data
 
-
 # ==========================================
-# 8. PIPELINE PRINCIPAL ENRICHISSEMENT + IA
+# 9. PIPELINE AVEC USER_ID
 # ==========================================
 
-def run_pipeline_task(query: str, raw_data: str):
+def run_pipeline_task(user_id: int, query: str, raw_data: str):
     db = SessionLocal()
     try:
-        # Récupère les prospects filtrés (+3 ans / Rhône-Alpes) avec email Hunter.io
         prospects = fetch_company_legal_info(query, limit=5)
-        print(f"🎯 {len(prospects)} prospect(s) qualifié(s) dans le secteur Rhône-Alpes (+3 ans)")
 
         for p in prospects:
             company_name = p["company_name"]
             manager_name = p["manager_name"]
             manager_email = p.get("email")
 
-            print(f"\n⚡ Traitement de : {company_name} (Dirigeant : {manager_name})")
-
-            # Qualification + Génération d'email
             qualif, email_info = qualify_and_generate(company_name, manager_name, raw_data)
 
-            # Vidéo HeyGen si le score est suffisant
             v_url = None
             if qualif.priority_score >= 7:
                 v_url = generate_heygen_video(company_name, manager_name)
 
-            # Sauvegarde en BDD
             lead = LeadModel(
+                user_id=user_id,  # 🔑 L'UTILISATEUR EST MAINTENANT ASSOCIÉ
                 company_name=company_name,
                 manager_name=manager_name,
                 email=manager_email,
@@ -579,11 +465,10 @@ def run_pipeline_task(query: str, raw_data: str):
                 email_subject=email_info.subject,
                 email_body=email_info.body,
                 video_url=v_url,
-                status="QUALIFIED" # 🛡️ Statut conservé pour validation manuelle
+                status="QUALIFIED"
             )
             db.add(lead)
             db.commit()
-            print(f"💾 Prospect sauvegardé : {company_name} | Mail : {manager_email}")
 
     except Exception as e:
         print(f"❌ Erreur pendant le pipeline : {e}")
@@ -592,22 +477,16 @@ def run_pipeline_task(query: str, raw_data: str):
         db.close()
 
 # ==========================================
-# 9. ENDPOINTS FASTAPI
+# 10. ENDPOINTS DE L'APPLICATION (ROUTES)
 # ==========================================
 
-app = FastAPI(
-    title="Dedall Energy - Automated Outreach Engine",
-    version="2.0.0"
-)
-
+# --- PAGE D'ACCUEIL ---
 @app.get("/")
 def home(request: Request, current_user: UserModel = Depends(get_current_user), db: Session = Depends(get_db)):
-    # Si l'utilisateur n'est pas connecté, on le redirige vers la page de login
     if not current_user:
         return RedirectResponse(url="/login-page", status_code=status.HTTP_303_SEE_OTHER)
     
     try:
-        # On ne récupère que les leads appartenant à l'utilisateur connecté !
         raw_leads = db.query(LeadModel).filter(LeadModel.user_id == current_user.id).order_by(LeadModel.id.desc()).all()
         leads_dict = [lead.to_dict() for lead in raw_leads]
         
@@ -619,22 +498,63 @@ def home(request: Request, current_user: UserModel = Depends(get_current_user), 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# --- AUTHENTIFICATION ---
+@app.get("/login-page")
+def login_page(request: Request):
+    return templates.TemplateResponse(request=request, name="login.html")
 
+@app.post("/register")
+def register(email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
+    db_user = db.query(UserModel).filter(UserModel.email == email).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Cet e-mail est déjà enregistré.")
+    
+    hashed_pwd = get_password_hash(password)
+    new_user = UserModel(email=email, hashed_password=hashed_pwd)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    return RedirectResponse(url="/login-page?registered=true", status_code=status.HTTP_303_SEE_OTHER)
 
+@app.post("/login")
+def login(response: Response, email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
+    user = db.query(UserModel).filter(UserModel.email == email).first()
+    if not user or not verify_password(password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="E-mail ou mot de passe incorrect.")
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
+    
+    redirect = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+    redirect.set_cookie(key="access_token", value=f"Bearer {access_token}", httponly=True)
+    return redirect
+
+@app.get("/logout")
+def logout():
+    response = RedirectResponse(url="/login-page", status_code=status.HTTP_303_SEE_OTHER)
+    response.delete_cookie("access_token")
+    return response
+
+# --- PIPELINE & ENVOI ---
 @app.post("/trigger-pipeline")
-def trigger_pipeline(payload: TriggerRequest, background_tasks: BackgroundTasks):
+def trigger_pipeline(payload: TriggerRequest, background_tasks: BackgroundTasks, current_user: UserModel = Depends(get_current_user)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Non autorisé.")
     company = payload.target_name
-    background_tasks.add_task(run_pipeline_task, company, payload.raw_data)
+    background_tasks.add_task(run_pipeline_task, current_user.id, company, payload.raw_data)
     return {"message": f"Pipeline lancé en tâche de fond pour : '{company}'"}
 
 @app.post("/send-pending-leads")
-def send_pending_leads(min_score: int = Query(7, ge=1, le=10)):
+def send_pending_leads(min_score: int = Query(7, ge=1, le=10), current_user: UserModel = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Non autorisé.")
     if not OUTREACH_WEBHOOK_URL:
         raise HTTPException(status_code=500, detail="OUTREACH_WEBHOOK_URL non configurée.")
 
-    db = SessionLocal()
     try:
         pending_leads = db.query(LeadModel).filter(
+            LeadModel.user_id == current_user.id,
             LeadModel.status == "QUALIFIED",
             LeadModel.priority_score >= min_score
         ).all()
@@ -667,11 +587,9 @@ def send_pending_leads(min_score: int = Query(7, ge=1, le=10)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
 
 # ==========================================
-# 10. DÉMARRAGE DU SERVEUR
+# 11. DÉMARRAGE DU SERVEUR
 # ==========================================
 
 if __name__ == "__main__":
