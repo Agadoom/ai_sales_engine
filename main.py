@@ -16,9 +16,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, Da
 from sqlalchemy.orm import declarative_base, sessionmaker, Session, relationship
 from openai import OpenAI
 import jwt
-# Supprime ou commente : from passlib.context import CryptContext
 import bcrypt
-
 
 # ==========================================
 # 1. INITIALISATION DE FASTAPI & ENV
@@ -40,7 +38,6 @@ OUTREACH_WEBHOOK_URL = os.getenv("OUTREACH_WEBHOOK_URL")
 if not DATABASE_URL:
     raise ValueError("⚠️ DATABASE_URL est manquante dans les variables d'environnement.")
 
-# Initialisation Client OpenAI
 client_openai = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 # ==========================================
@@ -107,7 +104,6 @@ class LeadModel(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# Auto-migrations
 with engine.connect() as conn:
     conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS manager_name VARCHAR;"))
     conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS phone VARCHAR;"))
@@ -116,32 +112,23 @@ with engine.connect() as conn:
     conn.commit()
 
 # ==========================================
-# 4. SÉCURITÉ & AUTHENTIFICATION JWT
+# 4. SÉCURITÉ & AUTHENTIFICATION (BCRYPT + JWT)
 # ==========================================
 
-SECRET_KEY = os.getenv("JWT_SECRET", "CHANGE_MOI_AVEC_UNE_CLÉ_TRÈS_SECRÈTE")
+SECRET_KEY = os.getenv("JWT_SECRET", "CHANGE_MOI_AVEC_UNE_CLE_TRES_SECRETE_123456")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=False)
 
-# ==========================================
-# FONCTIONS DE HACHAGE DES MOTS DE PASSE (BCRYPT DIRECT)
-# ==========================================
-
-
 def get_password_hash(password: str) -> str:
-  # Troncature de sécurité à 72 octets pour bcrypt
-  pwd_bytes = password.encode('utf-8')[:72]
-  salt = bcrypt.gensalt()
-  return bcrypt.hashpw(pwd_bytes, salt).decode('utf-8')
-
+    pwd_bytes = password.encode('utf-8')[:72]
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(pwd_bytes, salt).decode('utf-8')
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-  pwd_bytes = plain_password.encode('utf-8')[:72]
-  return bcrypt.checkpw(pwd_bytes, hashed_password.encode('utf-8'))
-
+    pwd_bytes = plain_password.encode('utf-8')[:72]
+    return bcrypt.checkpw(pwd_bytes, hashed_password.encode('utf-8'))
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -206,7 +193,7 @@ class GeneratedEmail(BaseModel):
     body: str
 
 # ==========================================
-# 7. FONCTIONS AUXILIAIRES & PIPELINE IA
+# 7. PIPELINE & FONCTIONS AUXILIAIRES
 # ==========================================
 
 def is_older_than_3_years(date_string: Optional[str]) -> bool:
@@ -344,7 +331,7 @@ Termine TOUJOURS l'email exactement par cette signature :
 
     return qualification, email_data
 
-def run_pipeline_task(query: str, raw_data: str):
+def run_pipeline_task(query: str, raw_data: str, user_id: Optional[int] = None):
     db = SessionLocal()
     try:
         prospects = fetch_company_legal_info(query, limit=5)
@@ -356,6 +343,7 @@ def run_pipeline_task(query: str, raw_data: str):
             qualif, email_info = qualify_and_generate(company_name, manager_name, raw_data)
 
             lead = LeadModel(
+                user_id=user_id,
                 company_name=company_name,
                 manager_name=manager_name,
                 email=manager_email,
@@ -433,9 +421,10 @@ def home(request: Request, current_user: Optional[UserModel] = Depends(get_curre
     )
 
 @app.post("/trigger-pipeline")
-def trigger_pipeline(payload: TriggerRequest, background_tasks: BackgroundTasks):
+def trigger_pipeline(payload: TriggerRequest, background_tasks: BackgroundTasks, current_user: Optional[UserModel] = Depends(get_current_user)):
     company = payload.target_name
-    background_tasks.add_task(run_pipeline_task, company, payload.raw_data)
+    user_id = current_user.id if current_user else None
+    background_tasks.add_task(run_pipeline_task, company, payload.raw_data, user_id)
     return {"message": f"Pipeline lancé en tâche de fond pour : '{company}'"}
 
 @app.post("/send-pending-leads")
