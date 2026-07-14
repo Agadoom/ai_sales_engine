@@ -9,5 +9,8 @@ psycopg2-binary
 streamlit
 pandas
 jinja2
+PyJWT
+passlib[bcrypt]
+
 
 
