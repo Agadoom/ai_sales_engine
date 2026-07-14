@@ -14,6 +14,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from openai import OpenAI
+from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey
+from sqlalchemy.orm import relationship
+from database import Base  # Ou l'import correspondant à ton fichier database.py
+
 
 # ==========================================
 # 1. AUTHENTIFICATION & SÉCURITÉ
@@ -68,22 +72,38 @@ client_openai = OpenAI(api_key=OPENAI_API_KEY)
 # 3. MODÈLE BASE DE DONNÉES (PostgreSQL)
 # ==========================================
 
-__tablename__ = "users"
-    
+# 1. LA TABLE UTILISATEUR (SaaS)
+class UserModel(Base):
+    __tablename__ = "users"
+
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
+    
+    # Gestion de l'abonnement
     is_active = Column(Boolean, default=True)
     subscription_status = Column(String, default="trial")  # trial, active, canceled
     stripe_customer_id = Column(String, nullable=True)
+    
+    # Clés API personnelles de l'utilisateur (optionnel, s'il utilise ses propres comptes)
+    openai_api_key = Column(String, nullable=True)
+    hunter_api_key = Column(String, nullable=True)
+    heygen_api_key = Column(String, nullable=True)
 
+    # Relation : Un utilisateur a plusieurs leads
+    leads = relationship("LeadModel", back_populates="owner", cascade="all, delete-orphan")
+
+
+# 2. LA TABLE LEADS (Mise à jour avec liaison utilisateur)
 class LeadModel(Base):
     __tablename__ = "leads"
-    
+
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))  # <--- LE LIEN ICI
+    
+    # 🔑 LA CLÉ ÉTRANGÈRE : Lie le lead à un utilisateur précis
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    
     company_name = Column(String, nullable=False)
-  , nullable=False)
     manager_name = Column(String, nullable=True)
     phone = Column(String, nullable=True)
     email = Column(String, nullable=True)
@@ -97,7 +117,9 @@ class LeadModel(Base):
     video_url = Column(Text, nullable=True)
     status = Column(String, default="QUALIFIED")
 
-    # 🔗 AJOUTE CETTE FONCTION ICI :
+    # Relation inverse : Le lead appartient à un utilisateur
+    owner = relationship("UserModel", back_populates="leads")
+
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
