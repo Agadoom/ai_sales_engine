@@ -104,12 +104,21 @@ class LeadModel(Base):
 
 Base.metadata.create_all(bind=engine)
 
+# Auto-migrations
 with engine.connect() as conn:
-    conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS manager_name VARCHAR;"))
-    conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS phone VARCHAR;"))
-    conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS email VARCHAR;"))
-    conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS address VARCHAR;"))
-    conn.commit()
+  conn.execute(
+      text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS user_id INTEGER;")
+  )
+  conn.execute(
+      text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS manager_name VARCHAR;")
+  )
+  conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS phone VARCHAR;"))
+  conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS email VARCHAR;"))
+  conn.execute(
+      text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS address VARCHAR;")
+  )
+  conn.commit()
+
 
 # ==========================================
 # 4. SÉCURITÉ & AUTHENTIFICATION (BCRYPT + JWT)
